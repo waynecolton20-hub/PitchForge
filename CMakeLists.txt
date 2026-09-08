@@ -14,12 +14,15 @@ juce_add_plugin(PitchForge
   PLUGIN_CODE Pf01
   FORMATS VST3 Standalone
   PRODUCT_NAME "PitchForge"
+  BUNDLE_ID "com.independentaudiotools.pitchforge"
   IS_SYNTH FALSE
   NEEDS_MIDI_INPUT FALSE
   NEEDS_MIDI_OUTPUT FALSE
   IS_MIDI_EFFECT FALSE
   COPY_PLUGIN_AFTER_BUILD TRUE
   VST3_CATEGORIES "Fx" "Pitch Shift")
+
+juce_generate_juce_header(PitchForge)
 
 target_sources(PitchForge PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp)
 target_compile_features(PitchForge PRIVATE cxx_std_17)
