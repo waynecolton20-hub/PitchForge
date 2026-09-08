@@ -82,7 +82,7 @@ private:
     int targetMidi = -1;
     float silenceGate = 0.001f;
 
-    float quantizePitch(float hz) const;
+    float quantizePitch(float hz);
     float midiToHz(float midi) const;
     int nearestScaleNote(int midi, int key, int scale) const;
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PitchForgeAudioProcessor)

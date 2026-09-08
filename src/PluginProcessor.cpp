@@ -164,7 +164,7 @@ int PitchForgeAudioProcessor::nearestScaleNote(int midi, int key, int scale) con
     return best;
 }
 
-float PitchForgeAudioProcessor::quantizePitch(float hz) const {
+float PitchForgeAudioProcessor::quantizePitch(float hz) {
     if (hz <= 0.0f) return 0.0f;
     const int key = (int)apvts.getRawParameterValue("key")->load();
     const int scale = (int)apvts.getRawParameterValue("scale")->load();
