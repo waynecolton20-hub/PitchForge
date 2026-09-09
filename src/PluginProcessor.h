@@ -1,8 +1,8 @@
 #pragma once
 #include <JuceHeader.h>
+#include <SoundTouch.h>
 #include <array>
 #include <atomic>
-#include <cmath>
 #include <vector>
 
 class PitchForgeAudioProcessor : public juce::AudioProcessor
@@ -39,12 +39,15 @@ public:
     int getDetectedMidi() const noexcept { return detectedMidi.load(); }
     int getTargetMidi() const noexcept { return targetMidi.load(); }
     float getCorrectionCents() const noexcept { return correctionCents.load(); }
+    int getAlgorithmicLatencySamples() const noexcept { return algorithmicLatencySamples.load(); }
 
 private:
     static constexpr int detectorSize = 2048;
-    static constexpr int maxDelay = 32768;
-    static constexpr int grainSize = 2048;
-    static constexpr int grainHop = grainSize / 2;
+    static constexpr int processingChunk = 128;
+    static constexpr int fifoCapacityFrames = 65536;
+    static constexpr float pi = 3.14159265358979323846f;
+    static constexpr float minHz = 70.0f;
+    static constexpr float maxHz = 1100.0f;
 
     class PitchDetector
     {
@@ -62,43 +65,66 @@ private:
         void analyse();
     };
 
-    // Two-window, overlap-add time-domain pitch shifter. Unlike the old implementation,
-    // both grains remain phase-continuous and are repositioned only at zero-crossing-style
-    // overlap boundaries, which removes the repeated hard resets that caused chopping.
-    class SmoothPitchShifter
+    // SoundTouch provides a continuous WSOLA/time-domain pitch processor instead of
+    // the previous grain-reset algorithm. It is fed in short blocks and drained into
+    // a preallocated FIFO so the plugin always returns exactly one output frame per
+    // input frame, avoiding the block starvation/clicking failure of v3.
+    class HighQualityPitchShifter
     {
     public:
-        void prepare(double sampleRate);
+        void prepare(double sampleRate, int samplesPerBlock);
         void reset();
-        float process(float input, float ratio);
-        int getLatencySamples() const noexcept { return grainSize; }
-        float getDelayedDry() const noexcept { return readAt(writePos - grainSize); }
+        void setLowLatency(bool enabled);
+        void setPitchRatio(float ratio);
+        void putStereo(const float* interleaved, int frames);
+        int receiveStereo(float* interleaved, int maxFrames);
+        int getLatencySamples() const noexcept { return latencySamples; }
+        bool isReady() const noexcept { return prepared; }
     private:
+        void configure(bool lowLatency);
+        void drainOutput();
+        static constexpr int scratchFrames = 4096;
+        soundtouch::SoundTouch engine;
+        std::vector<float> inputScratch;
+        std::vector<float> outputScratch;
+        std::vector<float> fifo;
+        std::vector<float> dry;
+        size_t fifoRead = 0, fifoWrite = 0;
+        size_t fifoCount = 0;
+        int startupReserve = 0;
         double fs = 44100.0;
-        std::array<float, maxDelay> ring{};
-        std::array<float, grainSize> window{};
-        double readA = 0.0, readB = 0.0;
-        int writePos = 0, phaseA = 0, phaseB = grainHop;
-        bool ready = false;
-        float smoothedRatio = 1.0f;
-        double baseDelay = grainSize * 1.5;
-        float readAt(double pos) const noexcept;
-        static double wrap(double x);
+        int maxBlock = 512;
+        int latencySamples = 0;
+        bool prepared = false;
+        bool lowLatency = true;
+        bool primed = false;
+        float currentRatio = 1.0f;
+        void pushFifo(const float* samples, int frames);
+        int popFifo(float* samples, int frames);
     };
 
     juce::AudioProcessorValueTreeState apvts;
     double fs = 44100.0;
     int blockSize = 0;
-    std::array<SmoothPitchShifter, 4> shifters;
+    HighQualityPitchShifter shifter;
+    HighQualityPitchShifter doublerShifter;
     PitchDetector detector;
 
     float correctionSemitones = 0.0f;
     float heldSemitones = 0.0f;
     int stableBlocks = 0;
     int lastTargetMidiInternal = -1;
+    bool previousLowLatency = true;
+
+    std::vector<float> processIn;
+    std::vector<float> processOut;
+    std::vector<float> doublerOut;
+    std::vector<float> dryDelay;
+    size_t dryDelayWrite = 0;
 
     std::atomic<float> inputPitch { 0.0f }, outputPitch { 0.0f }, confidence { 0.0f }, correctionCents { 0.0f };
-    std::atomic<int> detectedMidi { -1 }, targetMidi { -1 };
+    std::atomic<int> detectedMidi { -1 }, targetMidi { -1 }, algorithmicLatencySamples { 0 };
+    float processedBlend = 0.0f;
 
     float midiToHz(float midi) const;
     int nearestScaleNote(int midi, int key, int scale) const;

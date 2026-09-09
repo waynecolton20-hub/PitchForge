@@ -1,5 +1,8 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace {
 constexpr float pi = 3.14159265358979323846f;
@@ -76,98 +79,148 @@ void PitchForgeAudioProcessor::PitchDetector::analyse()
     float pitch=(float)(fs/refined);
     if(pitch>=minHz && pitch<=maxHz){
         float alpha=juce::jmap(best,0.62f,0.98f,0.10f,0.35f);
-        // Hysteresis prevents octave jumps from instantly taking over a sustained vowel.
         if(smoothedPitch>0.0f){ float semis=12.0f*std::log2(pitch/smoothedPitch); if(std::abs(semis)>7.0f && best<0.88f) pitch=smoothedPitch; }
         smoothedPitch += alpha*(pitch-smoothedPitch); confidence=best;
     }
 }
 
-void PitchForgeAudioProcessor::SmoothPitchShifter::prepare(double sampleRate)
+void PitchForgeAudioProcessor::HighQualityPitchShifter::prepare(double sampleRate, int samplesPerBlock)
 {
     fs = sampleRate;
-    for (int i = 0; i < grainSize; ++i)
-        window[i] = 0.5f - 0.5f * std::cos(2.0f * pi * (float) i / (float) (grainSize - 1));
+    maxBlock = juce::jmax(samplesPerBlock, 64);
+    inputScratch.resize((size_t) 2 * juce::jmax(maxBlock, scratchFrames));
+    outputScratch.resize((size_t) 2 * juce::jmax(maxBlock, scratchFrames));
+    fifo.assign((size_t) 2 * fifoCapacityFrames, 0.0f);
+    dry.assign((size_t) fifoCapacityFrames, 0.0f);
+    engine.setSampleRate((unsigned int) std::lround(sampleRate));
+    engine.setChannels(2);
+    engine.setSetting(soundtouch::SETTING_USE_AA_FILTER, 1);
+    engine.setSetting(soundtouch::SETTING_AA_FILTER_LENGTH, 64);
+    engine.setSetting(soundtouch::SETTING_USE_QUICKSEEK, 0);
+    engine.setPitch(1.0f);
+    configure(true);
     reset();
+    prepared = true;
 }
 
-void PitchForgeAudioProcessor::SmoothPitchShifter::reset()
+void PitchForgeAudioProcessor::HighQualityPitchShifter::configure(bool enabledLowLatency)
 {
-    ring.fill(0.0f);
-    writePos = 0;
-    phaseA = 0;
-    phaseB = grainHop;
-    readA = readB = 0.0;
-    ready = false;
-    smoothedRatio = 1.0f;
+    lowLatency = enabledLowLatency;
+    const int sequenceMs = lowLatency ? 24 : 40;
+    const int seekMs = lowLatency ? 10 : 15;
+    const int overlapMs = lowLatency ? 6 : 8;
+    engine.setSetting(soundtouch::SETTING_SEQUENCE_MS, sequenceMs);
+    engine.setSetting(soundtouch::SETTING_SEEKWINDOW_MS, seekMs);
+    engine.setSetting(soundtouch::SETTING_OVERLAP_MS, overlapMs);
+    const int initial = (int) engine.getSetting(soundtouch::SETTING_INITIAL_LATENCY);
+    // SoundTouch exposes its input/output pipeline latency directly. Do not
+    // subtract the nominal output sequence: that value describes the internal
+    // processing window, not host compensation.
+    latencySamples = juce::jmax(0, initial);
+    startupReserve = latencySamples + maxBlock * 2;
 }
 
-double PitchForgeAudioProcessor::SmoothPitchShifter::wrap(double x)
+void PitchForgeAudioProcessor::HighQualityPitchShifter::setLowLatency(bool enabled)
 {
-    while (x < 0.0) x += maxDelay;
-    while (x >= maxDelay) x -= maxDelay;
-    return x;
+    if (!prepared || enabled == lowLatency) return;
+    engine.clear();
+    fifoRead = fifoWrite = fifoCount = 0;
+    primed = false;
+    configure(enabled);
+    engine.setPitch(currentRatio);
 }
 
-float PitchForgeAudioProcessor::SmoothPitchShifter::readAt(double pos) const noexcept
+void PitchForgeAudioProcessor::HighQualityPitchShifter::reset()
 {
-    pos = wrap(pos);
-    const int i0 = (int) pos;
-    const int i1 = (i0 + 1) % maxDelay;
-    const float frac = (float) (pos - (double) i0);
-    return ring[i0] + frac * (ring[i1] - ring[i0]);
+    engine.clear();
+    engine.setPitch(1.0f);
+    currentRatio = 1.0f;
+    fifoRead = fifoWrite = fifoCount = 0;
+    primed = false;
+    std::fill(fifo.begin(), fifo.end(), 0.0f);
+    std::fill(dry.begin(), dry.end(), 0.0f);
 }
 
-float PitchForgeAudioProcessor::SmoothPitchShifter::process(float input, float ratio)
+void PitchForgeAudioProcessor::HighQualityPitchShifter::setPitchRatio(float ratio)
 {
-    // Dual-head, Hann-windowed granular pitch shifting. Each head is relaunched
-    // independently at a half-grain interval; the old implementation relaunched
-    // both heads together, which produced the audible chopping/crackling.
-    ring[writePos] = input;
+    currentRatio = juce::jlimit(0.5f, 2.0f, ratio);
+    engine.setPitch(currentRatio);
+}
 
-    if (!ready)
+void PitchForgeAudioProcessor::HighQualityPitchShifter::pushFifo(const float* samples, int frames)
+{
+    const size_t capacity = fifoCapacityFrames;
+    if ((size_t) frames > capacity) { samples += (frames - (int) capacity) * 2; frames = (int) capacity; }
+    if (fifoCount + (size_t) frames > capacity)
     {
-        readA = wrap((double) writePos - baseDelay);
-        readB = wrap(readA + grainHop * 0.5);
-        phaseA = 0;
-        phaseB = grainHop;
-        ready = true;
+        const size_t discard = fifoCount + (size_t) frames - capacity;
+        fifoRead = (fifoRead + discard * 2) % fifo.size();
+        fifoCount -= discard;
     }
-
-    const float targetRatio = juce::jlimit(0.5f, 2.0f, ratio);
-    // Smooth pitch-ratio modulation over ~5 ms to prevent zippering from the detector.
-    const float smoothing = 1.0f - std::exp(-1.0f / (float) (fs * 0.005));
-    smoothedRatio += smoothing * (targetRatio - smoothedRatio);
-
-    const float a = window[juce::jlimit(0, grainSize - 1, phaseA)];
-    const float b = window[juce::jlimit(0, grainSize - 1, phaseB)];
-    const float sum = juce::jmax(0.25f, a + b);
-    float out = (readAt(readA) * a + readAt(readB) * b) / sum;
-
-    readA = wrap(readA + smoothedRatio);
-    readB = wrap(readB + smoothedRatio);
-
-    if (++phaseA >= grainSize)
+    for (int i=0;i<frames;++i)
     {
-        phaseA = 0;
-        readA = wrap((double) writePos - baseDelay);
+        fifo[fifoWrite] = samples[i*2];
+        fifo[(fifoWrite+1)%fifo.size()] = samples[i*2+1];
+        fifoWrite = (fifoWrite + 2) % fifo.size();
     }
+    fifoCount += (size_t) frames;
+}
 
-    if (++phaseB >= grainSize)
+int PitchForgeAudioProcessor::HighQualityPitchShifter::popFifo(float* samples, int frames)
+{
+    const int available = (int) juce::jmin((size_t) frames, fifoCount);
+    for (int i=0;i<available;++i)
     {
-        phaseB = 0;
-        readB = wrap((double) writePos - baseDelay);
+        samples[i*2] = fifo[fifoRead];
+        samples[i*2+1] = fifo[(fifoRead+1)%fifo.size()];
+        fifoRead = (fifoRead + 2) % fifo.size();
     }
+    fifoCount -= (size_t) available;
+    return available;
+}
 
-    writePos = (writePos + 1) % maxDelay;
-    return out;
+void PitchForgeAudioProcessor::HighQualityPitchShifter::drainOutput()
+{
+    while (engine.numSamples() > 0)
+    {
+        const unsigned int available = engine.numSamples();
+        const int frames = (int) juce::jmin<unsigned int>(available, (unsigned int) scratchFrames);
+        const unsigned int got = engine.receiveSamples(outputScratch.data(), (unsigned int) frames);
+        if (got == 0) break;
+        pushFifo(outputScratch.data(), (int) got);
+    }
+}
+
+void PitchForgeAudioProcessor::HighQualityPitchShifter::putStereo(const float* interleaved, int frames)
+{
+    if (!prepared || frames <= 0) return;
+    engine.putSamples(interleaved, (unsigned int) frames);
+    drainOutput();
+}
+
+int PitchForgeAudioProcessor::HighQualityPitchShifter::receiveStereo(float* interleaved, int maxFrames)
+{
+    if (!prepared || maxFrames <= 0) return 0;
+    return popFifo(interleaved, maxFrames);
 }
 
 void PitchForgeAudioProcessor::prepareToPlay(double sampleRate,int samplesPerBlock)
 {
-    fs=sampleRate; blockSize=samplesPerBlock; detector.prepare(sampleRate); for(auto& s:shifters)s.prepare(sampleRate);
+    fs=sampleRate; blockSize=samplesPerBlock; detector.prepare(sampleRate);
+    shifter.prepare(sampleRate, samplesPerBlock);
+    doublerShifter.prepare(sampleRate, samplesPerBlock);
+    processIn.resize((size_t) 2 * juce::jmax(samplesPerBlock, 512));
+    processOut.resize((size_t) 2 * juce::jmax(samplesPerBlock, 512));
+    doublerOut.resize((size_t) 2 * juce::jmax(samplesPerBlock, 512));
+    dryDelay.assign((size_t) 2 * 32768, 0.0f);
+    dryDelayWrite = 0;
     correctionSemitones=heldSemitones=0.0f; stableBlocks=0; lastTargetMidiInternal=-1;
     inputPitch=outputPitch=confidence=correctionCents=0.0f; detectedMidi=targetMidi=-1;
-    setLatencySamples(0);
+    previousLowLatency = true;
+    processedBlend = 0.0f;
+    const int latency = shifter.getLatencySamples();
+    algorithmicLatencySamples.store(latency);
+    setLatencySamples(latency);
 }
 
 float PitchForgeAudioProcessor::midiToHz(float midi) const
@@ -191,12 +244,10 @@ float PitchForgeAudioProcessor::quantizePitch(float hz)
     const int scale=(int)apvts.getRawParameterValue("scale")->load();
     const bool chrom=apvts.getRawParameterValue("chromatic")->load()>0.5f;
     float midi=69.0f+12.0f*std::log2(hz/getReferenceHz());
-    int nearest=(int)std::lround(midi); int t=chrom?nearest:nearestScaleNote(nearest,key,scale); targetMidi.store(t); return midiToHz((float)t);
+    int nearest=(int)std::lround(midi); int t=chrom?nearest:nearestScaleNote(nearest,key,scale); targetMidi.store(t); detectedMidi.store(nearest); return midiToHz((float)t);
 }
 float PitchForgeAudioProcessor::getSpeedCoefficient(float speedMs) const
 {
-    // Map -3..200ms to a musically useful attack coefficient. Negative speed is deliberately
-    // aggressive; it does not mean a negative physical time.
     if(speedMs<=0.0f) return 0.65f;
     return juce::jlimit(0.002f,0.65f,1.0f-std::exp(-1.0f/(fs*(speedMs*0.001f)+1.0f)));
 }
@@ -220,99 +271,146 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
     const float dWidth = apvts.getRawParameterValue("doublerWidth")->load();
     const float dMix = apvts.getRawParameterValue("doublerMix")->load();
 
-    // The pitch shifter has real, fixed algorithmic latency. Report that latency
-    // and delay the dry path by the same amount so Mix never creates comb filtering.
-    const int algorithmicLatency = shifters[0].getLatencySamples();
-    setLatencySamples(algorithmicLatency);
+    if (lowLatency != previousLowLatency)
+    {
+        shifter.setLowLatency(lowLatency);
+        doublerShifter.setLowLatency(lowLatency);
+        previousLowLatency = lowLatency;
+    }
+    const int latency = shifter.getLatencySamples();
+    algorithmicLatencySamples.store(latency);
+    setLatencySamples(latency);
 
     const int stabilizerMs = stabilizer == 1 ? 40 : (stabilizer == 2 ? 80 : (stabilizer == 3 ? 200 : 0));
     const int requiredSamples = (int) (fs * stabilizerMs * 0.001);
+    const int chunkLimit = juce::jmax(1, juce::jmin(processingChunk, (int) processIn.size() / 2));
 
-    for (int i = 0; i < n; ++i)
+    for (int base=0; base<n; base += chunkLimit)
     {
-        const float leftIn = buffer.getSample(0, i);
-        const float rightIn = ch > 1 ? buffer.getSample(1, i) : leftIn;
-        const float mono = 0.5f * (leftIn + rightIn);
-
-        detector.push(mono);
-        const float detected = detector.getPitchHz();
-        const float conf = detector.getConfidence();
-        confidence.store(conf);
-        inputPitch.store(detected);
-
-        if (detected > 0.0f && conf > 0.62f && std::abs(mono) > 0.0006f)
+        const int frames = juce::jmin(chunkLimit, n-base);
+        float chunkRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
+        shifter.setPitchRatio(chunkRatio);
+        if (doubler && dMix > 0.001f)
         {
-            const float target = quantizePitch(detected);
-            const float rawSemi = 12.0f * std::log2(target / detected);
-            float capped = juce::jlimit(-range, range, rawSemi);
+            const float widthSemis = (dWidth * 2.0f - 1.0f) * 6.0f;
+            doublerShifter.setPitchRatio(std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f));
+        }
 
-            float effectiveSpeed = speed;
-            if (std::abs(heldSemitones - capped) < 0.35f)
-                effectiveSpeed += sustain * 60.0f;
-            effectiveSpeed = juce::jlimit(-3.0f, 200.0f, effectiveSpeed);
-            const float coeff = getSpeedCoefficient(effectiveSpeed);
+        for (int i=0;i<frames;++i)
+        {
+            const float left = buffer.getSample(0, base+i);
+            const float right = ch > 1 ? buffer.getSample(1, base+i) : left;
+            const float mono = 0.5f * (left + right);
+            detector.push(mono);
+            const float detected = detector.getPitchHz();
+            const float conf = detector.getConfidence();
+            confidence.store(conf);
+            inputPitch.store(detected);
 
-            if (stabilizer > 0 && !lowLatency)
+            if (detected > 0.0f && conf > 0.62f && std::abs(mono) > 0.0006f)
             {
-                if (lastTargetMidiInternal == targetMidi.load())
-                    stableBlocks += 1;
-                else
-                    stableBlocks = 0;
+                const float target = quantizePitch(detected);
+                const float rawSemi = 12.0f * std::log2(target / detected);
+                float capped = juce::jlimit(-range, range, rawSemi);
+                float effectiveSpeed = speed;
+                if (std::abs(heldSemitones - capped) < 0.35f) effectiveSpeed += sustain * 60.0f;
+                effectiveSpeed = juce::jlimit(-3.0f, 200.0f, effectiveSpeed);
+                const float coeff = getSpeedCoefficient(effectiveSpeed);
 
-                lastTargetMidiInternal = targetMidi.load();
-                const bool stableLongEnough = stableBlocks * juce::jmax(1, blockSize) >= requiredSamples;
-                if (!stableLongEnough)
-                    capped = heldSemitones;
+                if (stabilizer > 0 && !lowLatency)
+                {
+                    if (lastTargetMidiInternal == targetMidi.load()) stableBlocks += 1; else stableBlocks = 0;
+                    lastTargetMidiInternal = targetMidi.load();
+                    const bool stableLongEnough = stableBlocks * juce::jmax(1, blockSize) >= requiredSamples;
+                    if (!stableLongEnough) capped = heldSemitones;
+                }
+                heldSemitones += coeff * (capped - heldSemitones);
+                const float humanScale = 1.0f - human * 0.35f;
+                correctionSemitones += coeff * (heldSemitones - correctionSemitones) * humanScale;
+            }
+            else
+            {
+                correctionSemitones *= 0.9985f;
+                stableBlocks = 0;
             }
 
-            heldSemitones += coeff * (capped - heldSemitones);
-            // Humanize reduces the amount of instantaneous correction without adding
-            // random pitch jitter, which is what caused the previous roughness.
-            const float humanScale = 1.0f - human * 0.35f;
-            correctionSemitones += coeff * (heldSemitones - correctionSemitones) * humanScale;
+            const float applied = correctionSemitones * amount;
+            correctionCents.store(applied * 100.0f);
+            processIn[(size_t)i*2] = left;
+            processIn[(size_t)i*2+1] = right;
         }
-        else
+
+        // Use the ratio calculated at the end of the chunk so the DSP control is
+        // updated frequently without calling SoundTouch's control path every sample.
+        const float finalRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
+        shifter.setPitchRatio(finalRatio);
+        shifter.putStereo(processIn.data(), frames);
+        const int got = shifter.receiveStereo(processOut.data(), frames);
+        for (int i = got; i < frames; ++i)
         {
-            correctionSemitones *= 0.9985f;
-            stableBlocks = 0;
+            processOut[(size_t)i * 2] = 0.0f;
+            processOut[(size_t)i * 2 + 1] = 0.0f;
         }
-
-        const float applied = correctionSemitones * amount;
-        correctionCents.store(applied * 100.0f);
-        const float ratio = std::pow(2.0f, applied / 12.0f);
-
-        const float wetL = shifters[0].process(leftIn, ratio);
-        const float wetR = shifters[1].process(rightIn, ratio);
-        const float dryL = shifters[0].getDelayedDry();
-        const float dryR = shifters[1].getDelayedDry();
-
-        float left = wetL;
-        float right = wetR;
 
         if (doubler && dMix > 0.001f)
         {
-            const float widthGain = 0.5f + 0.5f * dWidth;
-            const float detune = 7.0f * widthGain;
-            const float dRatioL = std::pow(2.0f, (applied + detune) / 12.0f);
-            const float dRatioR = std::pow(2.0f, (applied - detune) / 12.0f);
-            const float dL = shifters[2].process(leftIn, dRatioL);
-            const float dR = shifters[3].process(rightIn, dRatioR);
-            left = wetL * (1.0f - dMix) + dL * dMix;
-            right = wetR * (1.0f - dMix) + dR * dMix;
+            const float widthSemis = (dWidth * 2.0f - 1.0f) * 6.0f;
+            doublerShifter.setPitchRatio(std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f));
+            doublerShifter.putStereo(processIn.data(), frames);
+        }
+        int dGot = 0;
+        if (doubler && dMix > 0.001f) {
+            std::fill(doublerOut.begin(), doublerOut.begin() + (size_t)frames * 2, 0.0f);
+            dGot = doublerShifter.receiveStereo(doublerOut.data(), frames);
         }
 
-        buffer.setSample(0, i, dryL + (left - dryL) * mix);
-        if (ch > 1)
-            buffer.setSample(1, i, dryR + (right - dryR) * mix);
+        for (int i=0;i<frames;++i)
+        {
+            const float leftIn = processIn[(size_t)i*2];
+            const float rightIn = processIn[(size_t)i*2+1];
+            float wetL = processOut[(size_t)i*2];
+            float wetR = processOut[(size_t)i*2+1];
+            if (doubler && dMix > 0.001f && i < dGot)
+            {
+                const float dL = doublerOut[(size_t)i*2];
+                const float dR = doublerOut[(size_t)i*2+1];
+                wetL = wetL * (1.0f-dMix) + dL*dMix;
+                wetR = wetR * (1.0f-dMix) + dR*dMix;
+            }
 
-        if (detected > 0.0f)
-        {
-            const float outputMidi = 69.0f + 12.0f * std::log2(detected / getReferenceHz()) + applied;
-            outputPitch.store(midiToHz(outputMidi));
-        }
-        else
-        {
-            outputPitch.store(0.0f);
+            // Delay the dry path by the measured average SoundTouch pipeline latency.
+            const size_t dryCapacity = dryDelay.size() / 2;
+            const size_t write = dryDelayWrite;
+            dryDelay[write*2] = leftIn;
+            dryDelay[write*2+1] = rightIn;
+            const size_t read = (write + dryCapacity - (size_t)juce::jlimit(0, (int)dryCapacity-1, latency)) % dryCapacity;
+            const float dryL = dryDelay[read*2];
+            const float dryR = dryDelay[read*2+1];
+            dryDelayWrite = (dryDelayWrite + 1) % dryCapacity;
+
+            // Smoothly enter/leave the processed stream. This is a safety net for
+            // SoundTouch's variable internal output availability and guarantees
+            // that an underflow can never become a hard zero-sample discontinuity.
+            const float desiredBlend = (i < got ? 1.0f : 0.0f);
+            const float blendStep = 1.0f / 256.0f;
+            if (processedBlend < desiredBlend) processedBlend = juce::jmin(desiredBlend, processedBlend + blendStep);
+            else if (processedBlend > desiredBlend) processedBlend = juce::jmax(desiredBlend, processedBlend - blendStep);
+
+            const float safeWetL = dryL + (wetL - dryL) * processedBlend;
+            const float safeWetR = dryR + (wetR - dryR) * processedBlend;
+            const float outL = dryL + (safeWetL - dryL) * mix;
+            const float outR = dryR + (safeWetR - dryR) * mix;
+            buffer.setSample(0, base+i, outL);
+            if (ch > 1) buffer.setSample(1, base+i, outR);
+
+            const float detected = inputPitch.load();
+            const float applied = correctionCents.load() / 100.0f;
+            if (detected > 0.0f)
+            {
+                const float outputMidi = 69.0f + 12.0f*std::log2(detected/getReferenceHz()) + applied;
+                outputPitch.store(midiToHz(outputMidi));
+            }
+            else outputPitch.store(0.0f);
         }
     }
 }
