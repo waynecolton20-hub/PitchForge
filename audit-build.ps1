@@ -67,7 +67,7 @@ $checks = @(
     [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
     [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
     [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.9-Windows-VST3\.zip'); Name = 'Final v4.1.9 artifact name is consistent' },
-    [pscustomobject]@{ Pass = ($processBody -match 'for\s*\(int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\).*processIn' -and $processBody -notmatch 'for\s*\(int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*i\+\+\\s*\)\s*\{\s*processOut[^;]+\=\s*0\.0f'); Name = 'Underflow loop uses continuity fallback instead of zero padding' },
+    [pscustomobject]@{ Pass = ($processBody -match '(?s)for\s*\(\s*int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\s*\)\s*\{\s*processOut\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\]\s*=\s*processIn\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\]\s*;\s*processOut\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\+\s*1\s*\]\s*=\s*processIn\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\+\s*1\s*\]\s*;\s*\}' -and $processBody -notmatch '(?s)for\s*\(\s*int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\s*\)\s*\{.*?processOut\s*\[[^]]+\]\s*=\s*0\.0f') ; Name = 'Underflow loop uses continuity fallback instead of zero padding' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },
     [pscustomobject]@{ Pass = ($wf -notmatch '\x60(?:r\x60n|n|r)'); Name = 'Workflow has no literal PowerShell newline escape text' }
