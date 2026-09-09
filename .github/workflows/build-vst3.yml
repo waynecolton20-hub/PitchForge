@@ -17,34 +17,52 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v6
+
+      - name: Validate source tree
+        shell: pwsh
+        run: |
+          $required = @(
+            'CMakeLists.txt',
+            'src/PluginProcessor.h',
+            'src/PluginProcessor.cpp',
+            'src/PluginEditor.h',
+            'src/PluginEditor.cpp'
+          )
+          foreach ($f in $required) {
+            if (-not (Test-Path $f)) { throw "Missing required source file: $f" }
+          }
+          $cm = Get-Content CMakeLists.txt -Raw
+          if ($cm -match '`r`n|`n|`r') { throw 'Literal PowerShell newline escapes found in CMakeLists.txt.' }
+          if ($cm -notmatch 'VST3_CAN_REPLACE_VST2\s+FALSE') { throw 'VST3 replacement guard missing.' }
+          $ps = Get-Content src/PluginProcessor.cpp -Raw
+          if ($ps -notmatch 'float PitchForgeAudioProcessor::quantizePitch\(float hz\)') { throw 'quantizePitch signature is invalid.' }
+
       - name: Configure CMake
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          if (-not (Test-Path 'CMakeLists.txt')) { throw 'CMakeLists.txt missing.' }
-          $cmakeText = Get-Content -Raw 'CMakeLists.txt'
-          if ($cmakeText.Contains('`r`n')) { throw 'Literal PowerShell escape characters found in CMakeLists.txt.' }
-          if ($cmakeText -notmatch 'VST3_CAN_REPLACE_VST2\s+FALSE') { throw 'Missing VST3_CAN_REPLACE_VST2 FALSE.' }
-          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DCMAKE_BUILD_TYPE=Release
-      - name: Build VST3
+        run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+
+      - name: Locate VST3
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          cmake --build build --config Release --parallel
-      - name: Verify VST3 bundle
+          $v = Get-ChildItem -Path build -Filter PitchForge.vst3 -Recurse -Directory |
+            Select-Object -First 1
+          if (-not $v) {
+            Get-ChildItem build -Recurse | Select-Object FullName
+            throw 'PitchForge.vst3 was not produced.'
+          }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item -Path $v.FullName -Destination artifact/PitchForge.vst3 -Recurse -Force
+
+      - name: Package artifact
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
-          $vst3 = Get-ChildItem -Path build -Filter 'PitchForge.vst3' -Recurse -Directory | Where-Object { $_.Name -eq 'PitchForge.vst3' } | Select-Object -First 1
-          if (-not $vst3) { Get-ChildItem -Path build -Recurse | Select-Object FullName; throw 'PitchForge.vst3 was not produced.' }
-          New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item $vst3.FullName 'artifact/PitchForge.vst3' -Recurse -Force
-      - name: Package VST3
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          Compress-Archive -Path 'artifact/PitchForge.vst3' -DestinationPath 'artifact/PitchForge-Windows-VST3.zip' -Force
-      - name: Upload VST3 artifact
+          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-Windows-VST3.zip -Force
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: PitchForge-Windows-VST3
