@@ -14,51 +14,36 @@ jobs:
   build-windows-vst3:
     name: Build Windows VST3
     runs-on: windows-2022
-
     steps:
       - name: Check out source
         uses: actions/checkout@v6
-
       - name: Configure CMake
         shell: pwsh
         run: |
-          if (-not (Test-Path CMakeLists.txt)) {
-            throw 'PitchForge source is not present: CMakeLists.txt was not found.'
-          }
-
-          cmake -S . -B build `
-            -G "Visual Studio 17 2022" `
-            -A x64
-
+          $ErrorActionPreference = 'Stop'
+          if (-not (Test-Path 'CMakeLists.txt')) { throw 'CMakeLists.txt missing.' }
+          $cmakeText = Get-Content -Raw 'CMakeLists.txt'
+          if ($cmakeText.Contains('`r`n')) { throw 'Literal PowerShell escape characters found in CMakeLists.txt.' }
+          if ($cmakeText -notmatch 'VST3_CAN_REPLACE_VST2\s+FALSE') { throw 'Missing VST3_CAN_REPLACE_VST2 FALSE.' }
+          cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -DCMAKE_BUILD_TYPE=Release
       - name: Build VST3
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           cmake --build build --config Release --parallel
-
-      - name: Locate VST3 bundle
+      - name: Verify VST3 bundle
         shell: pwsh
         run: |
-          $vst3 = Get-ChildItem -Path build -Filter *.vst3 -Recurse -Directory |
-            Where-Object { $_.Name -eq 'PitchForge.vst3' } |
-            Select-Object -First 1
-
-          if (-not $vst3) {
-            Write-Host 'Build directory contents:'
-            Get-ChildItem -Path build -Recurse | Select-Object FullName
-            throw 'No PitchForge.vst3 bundle was produced by the build.'
-          }
-
+          $ErrorActionPreference = 'Stop'
+          $vst3 = Get-ChildItem -Path build -Filter 'PitchForge.vst3' -Recurse -Directory | Where-Object { $_.Name -eq 'PitchForge.vst3' } | Select-Object -First 1
+          if (-not $vst3) { Get-ChildItem -Path build -Recurse | Select-Object FullName; throw 'PitchForge.vst3 was not produced.' }
           New-Item -ItemType Directory -Force -Path artifact | Out-Null
-          Copy-Item -Path $vst3.FullName -Destination artifact/PitchForge.vst3 -Recurse -Force
-
+          Copy-Item $vst3.FullName 'artifact/PitchForge.vst3' -Recurse -Force
       - name: Package VST3
         shell: pwsh
         run: |
-          Compress-Archive `
-            -Path artifact/PitchForge.vst3 `
-            -DestinationPath artifact/PitchForge-Windows-VST3.zip `
-            -Force
-
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path 'artifact/PitchForge.vst3' -DestinationPath 'artifact/PitchForge-Windows-VST3.zip' -Force
       - name: Upload VST3 artifact
         uses: actions/upload-artifact@v4
         with:
