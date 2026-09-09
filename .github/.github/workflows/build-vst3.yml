@@ -1,0 +1,75 @@
+name: Build PitchForge v4.1 VST3 (Windows)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-vst3:
+    name: Build Windows VST3
+    runs-on: windows-2022
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Validate source tree
+        shell: pwsh
+        run: |
+          $required = @(
+            'CMakeLists.txt',
+            'src/PluginProcessor.h',
+            'src/PluginProcessor.cpp',
+            'src/PluginEditor.h',
+            'src/PluginEditor.cpp'
+          )
+          foreach ($f in $required) {
+            if (-not (Test-Path $f)) { throw "Missing required source file: $f" }
+          }
+          $cm = Get-Content CMakeLists.txt -Raw
+          if ($cm -match '`r`n|`n|`r') { throw 'Literal PowerShell newline escapes found in CMakeLists.txt.' }
+          if ($cm -notmatch 'VST3_CAN_REPLACE_VST2\s+FALSE') { throw 'VST3 replacement guard missing.' }
+          if ($cm -notmatch 'soundtouch-2\.3\.3') { throw 'SoundTouch 2.3.3 dependency missing.' }
+          $ps = Get-Content src/PluginProcessor.cpp -Raw
+          if ($ps -notmatch 'SoundTouch') { throw 'HQ SoundTouch engine missing.' }
+          if ($ps -match 'SmoothPitchShifter') { throw 'Old granular shifter code is still present.' }
+          if ($ps -match 'for \(int i=got;i<frames;\+\+i\)') { throw 'Old zero-padding underflow code is still present.' }
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build build --config Release --parallel 2 2
+
+      - name: Locate VST3
+        shell: pwsh
+        run: |
+          $v = Get-ChildItem -Path build -Filter PitchForge.vst3 -Recurse -Directory |
+            Select-Object -First 1
+          if (-not $v) {
+            Get-ChildItem build -Recurse | Select-Object FullName
+            throw 'PitchForge.vst3 was not produced.'
+          }
+          New-Item -ItemType Directory -Force artifact | Out-Null
+          Copy-Item -Path $v.FullName -Destination artifact/PitchForge.vst3 -Recurse -Force
+
+      - name: Package artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.1-Windows-VST3.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PitchForge-v4.1-Windows-VST3
+          path: artifact/PitchForge-v4.1-Windows-VST3.zip
+          if-no-files-found: error
+          retention-days: 30

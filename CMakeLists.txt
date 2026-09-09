@@ -1,17 +1,28 @@
 cmake_minimum_required(VERSION 3.22)
-project(PitchForge VERSION 3.0.0)
+project(PitchForge VERSION 4.0.0)
 
 include(FetchContent)
+
 FetchContent_Declare(juce
   GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
   GIT_TAG 8.0.8
   GIT_SHALLOW TRUE)
 FetchContent_MakeAvailable(juce)
 
+# High-quality open-source pitch/time processor. SoundTouch is LGPL-2.1.
+set(SOUNDTOUCH_BUILD_SHARED OFF CACHE BOOL "" FORCE)
+set(SOUNDTOUCH_DLL OFF CACHE BOOL "" FORCE)
+set(SOUNDSTRETCH OFF CACHE BOOL "" FORCE)
+set(OPENMP OFF CACHE BOOL "" FORCE)
+set(INTEGER_SAMPLES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(soundtouch
+  URL https://www.surina.net/soundtouch/soundtouch-2.3.3.tar.gz)
+FetchContent_MakeAvailable(soundtouch)
+
 juce_add_plugin(PitchForge
   COMPANY_NAME "Independent Audio Tools"
   PLUGIN_MANUFACTURER_CODE IAT0
-  PLUGIN_CODE Pf03
+  PLUGIN_CODE Pf04
   FORMATS VST3 Standalone
   PRODUCT_NAME "PitchForge"
   PLUGIN_NAME "PitchForge"
@@ -26,8 +37,8 @@ juce_add_plugin(PitchForge
   VST3_CATEGORIES "Fx" "Pitch Shift"
 )
 
-target_compile_definitions(PitchForge_VST3 PRIVATE JUCE_VST3_CAN_REPLACE_VST2=0)
+target_compile_definitions(PitchForge_VST3 PRIVATE JUCE_VST3_CAN_REPLACE_VST2=0 SOUNDTOUCH_FLOAT_SAMPLES=1)
 juce_generate_juce_header(PitchForge)
 target_sources(PitchForge PRIVATE src/PluginProcessor.cpp src/PluginEditor.cpp)
 target_compile_features(PitchForge PRIVATE cxx_std_17)
-target_link_libraries(PitchForge PRIVATE juce::juce_audio_utils juce::juce_dsp)
+target_link_libraries(PitchForge PRIVATE juce::juce_audio_utils juce::juce_dsp SoundTouch)
