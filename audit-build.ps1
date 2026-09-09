@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
-Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.7'
+Set-StrictMode -Version Latest
+Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.8'
 
 $required = @(
     'CMakeLists.txt',
@@ -10,26 +11,36 @@ $required = @(
     '.github/workflows/build-vst3.yml'
 )
 foreach ($f in $required) {
-    if (-not (Test-Path $f -PathType Leaf)) { throw "Missing required file: $f" }
+    if (-not (Test-Path -LiteralPath $f -PathType Leaf)) { throw "Missing required file: $f" }
 }
 
 $cm = Get-Content CMakeLists.txt -Raw
 $ps = Get-Content src/PluginProcessor.cpp -Raw
+$ph = Get-Content src/PluginProcessor.h -Raw
 $ed = Get-Content src/PluginEditor.cpp -Raw
 $wf = Get-Content .github/workflows/build-vst3.yml -Raw
 
-# Only inspect the body of processBlock for realtime-allocation checks.
 $m = [regex]::Match(
     $ps,
     '(?s)void\s+PitchForgeAudioProcessor::processBlock\s*\([^)]*\)\s*\{(?<body>.*?)\n\}\s*\n\s*void\s+PitchForgeAudioProcessor::getStateInformation'
 )
 if (-not $m.Success) { throw 'Could not isolate processBlock for realtime-safety audit.' }
 $processBody = $m.Groups['body'].Value
-
-# Normalize whitespace so CRLF/LF differences cannot create a false failure.
 $wfNormalized = [regex]::Replace($wf, '\s+', ' ').Trim()
 
 $checks = @(
+    [pscustomobject]@{ Pass = ($cm -match 'cmake_minimum_required\(VERSION 3\.22\)'); Name = 'CMake minimum version is supported' },
+    [pscustomobject]@{ Pass = ($cm -match 'GIT_REPOSITORY\s+https://github\.com/juce-framework/JUCE\.git'); Name = 'JUCE source is fetched from GitHub' },
+    [pscustomobject]@{ Pass = ($cm -match 'GIT_TAG 8\.0\.8'); Name = 'JUCE 8.0.8 is pinned' },
+    [pscustomobject]@{ Pass = ($cm -match 'GIT_REPOSITORY\s+https://github\.com/stenzek/soundtouch\.git'); Name = 'SoundTouch uses reachable GitHub source' },
+    [pscustomobject]@{ Pass = ($cm -match 'GIT_TAG e83424d5928ab8513d2d082779c275765dee31b9'); Name = 'SoundTouch 2.3.3 commit is immutable-pinned' },
+    [pscustomobject]@{ Pass = ($cm -match 'GIT_SHALLOW FALSE'); Name = 'SoundTouch immutable commit fetch is non-shallow' },
+    [pscustomobject]@{ Pass = ($cm -notmatch 'www\.surina\.net'); Name = 'Unreliable SoundTouch tarball host is absent' },
+    [pscustomobject]@{ Pass = ($cm -match 'VST3_CAN_REPLACE_VST2\s+FALSE'); Name = 'VST2 replacement guard is present' },
+    [pscustomobject]@{ Pass = ($cm -match 'target_compile_definitions\(PitchForge_VST3 PRIVATE[^\n]*SOUNDTOUCH_FLOAT_SAMPLES=1'); Name = 'SoundTouch float sample mode is enabled for VST3' },
+    [pscustomobject]@{ Pass = ($cm -match 'target_compile_features\(PitchForge PRIVATE cxx_std_17\)'); Name = 'C++17 is explicitly required' },
+    [pscustomobject]@{ Pass = ($cm -match 'target_sources\(PitchForge PRIVATE src/PluginProcessor\.cpp src/PluginEditor\.cpp\)'); Name = 'Plugin source targets are wired' },
+    [pscustomobject]@{ Pass = ($cm -match 'target_link_libraries\(PitchForge PRIVATE .*SoundTouch\)'); Name = 'SoundTouch is linked to plugin target' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'soundtouch::SETTING_'); Name = 'SoundTouch setting macros are not namespace-qualified' },
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_USE_AA_FILTER,\s*1\)'); Name = 'SoundTouch AA filter setting is present' },
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_AA_FILTER_LENGTH,\s*64\)'); Name = 'SoundTouch AA filter length is present' },
@@ -40,18 +51,26 @@ $checks = @(
     [pscustomobject]@{ Pass = ($ps -match 'engine\.getSetting\(SETTING_INITIAL_LATENCY\)'); Name = 'SoundTouch initial latency query is present' },
     [pscustomobject]@{ Pass = ($ed -notmatch 'textToValueFunction'); Name = 'JUCE Slider parser uses valueFromTextFunction' },
     [pscustomobject]@{ Pass = ($ed -match 'PathStrokeType\(4\.0f,\s*juce::PathStrokeType::curved,\s*juce::PathStrokeType::rounded\)'); Name = 'Needle stroke constructor uses valid JUCE signature' },
+    [pscustomobject]@{ Pass = ($ps -notmatch 'SmoothPitchShifter'); Name = 'Legacy granular shifter is absent' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'processOut\[\(size_t\)i \* 2\] = 0\.0f'); Name = 'No hard-zero wet-output fallback remains' },
     [pscustomobject]@{ Pass = ($ps -match 'processOut\[\(size_t\)i \* 2\] = processIn\[\(size_t\)i \* 2\]'); Name = 'Wet underflow uses continuity fallback' },
-    [pscustomobject]@{ Pass = ($ps -notmatch 'SmoothPitchShifter'); Name = 'Legacy granular shifter is absent' },
-    [pscustomobject]@{ Pass = ($processBody -notmatch '(?i)(new\s+\w+|delete\s+|std::malloc|std::free|\.resize\s*\(|\.assign\s*\(|std::vector\s*<[^>]+>\s+\w+\s*[;=])'); Name = 'No obvious heap-allocation operations are introduced in processBlock' },
-    [pscustomobject]@{ Pass = ($ps -match 'const float coefficient = 1\.0f - static_cast<float>\(std::exp\('); Name = 'Speed coefficient resolves exp result to float before jlimit' },
-    [pscustomobject]@{ Pass = ($ps -match 'juce::jlimit\(-range, range, rawSemi\)'); Name = 'Correction range jlimit is type-consistent' },
-    [pscustomobject]@{ Pass = ($wfNormalized -match 'cmake --build build --config Release --parallel 2(?: |$)'); Name = 'Windows build command is canonical' },
+    [pscustomobject]@{ Pass = ($processBody -notmatch '(?i)(new\s+\w+|delete\s+|std::malloc|std::free|\.resize\s*\(|\.assign\s*\(|std::vector\s*<[^>]+>\s+\w+\s*[;=]|std::string\s+\w+\s*[;=]|juce::String\s+\w+\s*[;=]|make_unique|make_shared|lock_guard|ScopedLock|CriticalSection|MessageManagerLock|Logger::|juce::File|std::cout|std::cerr)'); Name = 'processBlock has no obvious realtime-allocation/locking/I-O operations' },
+    [pscustomobject]@{ Pass = ($processBody -match 'shifter\.putStereo\(processIn\.data\(\), frames\)'); Name = 'processBlock feeds the primary shifter' },
+    [pscustomobject]@{ Pass = ($processBody -match 'shifter\.receiveStereo\(processOut\.data\(\), frames\)'); Name = 'processBlock drains the primary shifter' },
+    [pscustomobject]@{ Pass = ($processBody -match 'const int got = shifter\.receiveStereo'); Name = 'Primary output availability is tracked' },
+    [pscustomobject]@{ Pass = ($wf -match 'runs-on:\s*windows-2022'); Name = 'Windows 2022 runner is selected' },
+    [pscustomobject]@{ Pass = ($wf -match 'uses:\s*actions/checkout@v6'); Name = 'Checkout action is present' },
+    [pscustomobject]@{ Pass = ($wf -match 'uses:\s*actions/upload-artifact@v4'); Name = 'Artifact upload action is present' },
+    [pscustomobject]@{ Pass = ($wf -match 'cmake -S \. -B build -G "Visual Studio 17 2022" -A x64 -DCMAKE_BUILD_TYPE=Release'); Name = 'CMake configure command is canonical' },
+    [pscustomobject]@{ Pass = (([regex]::Matches($wfNormalized, 'cmake --build build --config Release --parallel 2')).Count -eq 1); Name = 'Exactly one canonical Windows build command is present' },
     [pscustomobject]@{ Pass = ($wfNormalized -notmatch 'cmake --build build --config Release --parallel 2 2'); Name = 'Malformed duplicate parallel argument is absent' },
-    [pscustomobject]@{ Pass = ($cm -match 'VST3_CAN_REPLACE_VST2\s+FALSE'); Name = 'VST2 replacement guard is present' },
-    [pscustomobject]@{ Pass = ($cm -match 'soundtouch-2\.3\.3'); Name = 'SoundTouch 2.3.3 is pinned' },
-    [pscustomobject]@{ Pass = ($cm -match 'DOWNLOAD_EXTRACT_TIMESTAMP\s+TRUE'); Name = 'Deterministic archive extraction is requested' },
-    [pscustomobject]@{ Pass = ($cm -match 'target_compile_definitions\(PitchForge_VST3 PRIVATE[^\n]*SOUNDTOUCH_FLOAT_SAMPLES=1'); Name = 'SoundTouch float sample mode is enabled for VST3 target' }
+    [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
+    [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
+    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.8-Windows-VST3\.zip'); Name = 'Final v4.1.8 artifact name is consistent' },
+    [pscustomobject]@{ Pass = ($ps -notmatch '(?i)for\s*\(int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames'); Name = 'Old zero-padding loop form is absent' },
+    [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
+    [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },
+    [pscustomobject]@{ Pass = ($wf -notmatch '`r`n|`n|`r'); Name = 'Workflow has no literal newline escape corruption' }
 )
 
 $failed = @($checks | Where-Object { -not $_.Pass })

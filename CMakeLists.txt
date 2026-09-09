@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(PitchForge VERSION 4.0.0)
+project(PitchForge VERSION 4.1.8)
 
 include(FetchContent)
 
@@ -20,9 +20,13 @@ set(SOUNDTOUCH_DLL OFF CACHE BOOL "" FORCE)
 set(SOUNDSTRETCH OFF CACHE BOOL "" FORCE)
 set(OPENMP OFF CACHE BOOL "" FORCE)
 set(INTEGER_SAMPLES OFF CACHE BOOL "" FORCE)
+# Use a GitHub-hosted, immutable SoundTouch 2.3.3 commit. The previous
+# release tarball host intermittently timed out on GitHub Actions runners.
+# Pin the exact 2.3.3 commit to avoid floating dependency contents.
 FetchContent_Declare(soundtouch
-  URL https://www.surina.net/soundtouch/soundtouch-2.3.3.tar.gz
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+  GIT_REPOSITORY https://github.com/stenzek/soundtouch.git
+  GIT_TAG e83424d5928ab8513d2d082779c275765dee31b9
+  GIT_SHALLOW FALSE)
 FetchContent_MakeAvailable(soundtouch)
 
 juce_add_plugin(PitchForge

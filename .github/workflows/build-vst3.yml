@@ -1,4 +1,4 @@
-name: Build PitchForge v4.1 VST3 (Windows)
+name: Build PitchForge v4.1.8 VST3 (Windows)
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
     runs-on: windows-2022
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v6 # d23441a48e516b6c34aea4fa41551a30e30af803
 
       - name: Validate source tree
         shell: pwsh
@@ -34,7 +34,9 @@ jobs:
           $cm = Get-Content CMakeLists.txt -Raw
           if ($cm -match '`r`n|`n|`r') { throw 'Literal PowerShell newline escapes found in CMakeLists.txt.' }
           if ($cm -notmatch 'VST3_CAN_REPLACE_VST2\s+FALSE') { throw 'VST3 replacement guard missing.' }
-          if ($cm -notmatch 'soundtouch-2\.3\.3') { throw 'SoundTouch 2.3.3 dependency missing.' }
+          if ($cm -notmatch 'GIT_REPOSITORY\s+https://github\.com/stenzek/soundtouch\.git') { throw 'GitHub SoundTouch repository missing.' }
+          if ($cm -notmatch 'e83424d5928ab8513d2d082779c275765dee31b9') { throw 'Pinned SoundTouch 2.3.3 commit missing.' }
+          if ($cm -match 'www\.surina\.net') { throw 'Unreliable SoundTouch tarball host remains.' }
           $ps = Get-Content src/PluginProcessor.cpp -Raw
           if ($ps -notmatch 'SoundTouch') { throw 'HQ SoundTouch engine missing.' }
           if ($ps -match 'SmoothPitchShifter') { throw 'Old granular shifter code is still present.' }
@@ -68,12 +70,13 @@ jobs:
       - name: Package artifact
         shell: pwsh
         run: |
-          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.1-Windows-VST3.zip -Force
+          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.1.8-Windows-VST3.zip -Force
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4 # ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: PitchForge-v4.1-Windows-VST3
-          path: artifact/PitchForge-v4.1-Windows-VST3.zip
+          name: PitchForge-v4.1.8-Windows-VST3
+          path: artifact/PitchForge-v4.1.8-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 30
+
