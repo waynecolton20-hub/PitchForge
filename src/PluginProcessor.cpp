@@ -94,9 +94,9 @@ void PitchForgeAudioProcessor::HighQualityPitchShifter::prepare(double sampleRat
     dry.assign((size_t) fifoCapacityFrames, 0.0f);
     engine.setSampleRate((unsigned int) std::lround(sampleRate));
     engine.setChannels(2);
-    engine.setSetting(soundtouch::SETTING_USE_AA_FILTER, 1);
-    engine.setSetting(soundtouch::SETTING_AA_FILTER_LENGTH, 64);
-    engine.setSetting(soundtouch::SETTING_USE_QUICKSEEK, 0);
+    engine.setSetting(SETTING_USE_AA_FILTER, 1);
+    engine.setSetting(SETTING_AA_FILTER_LENGTH, 64);
+    engine.setSetting(SETTING_USE_QUICKSEEK, 0);
     engine.setPitch(1.0f);
     configure(true);
     reset();
@@ -109,10 +109,10 @@ void PitchForgeAudioProcessor::HighQualityPitchShifter::configure(bool enabledLo
     const int sequenceMs = lowLatency ? 24 : 40;
     const int seekMs = lowLatency ? 10 : 15;
     const int overlapMs = lowLatency ? 6 : 8;
-    engine.setSetting(soundtouch::SETTING_SEQUENCE_MS, sequenceMs);
-    engine.setSetting(soundtouch::SETTING_SEEKWINDOW_MS, seekMs);
-    engine.setSetting(soundtouch::SETTING_OVERLAP_MS, overlapMs);
-    const int initial = (int) engine.getSetting(soundtouch::SETTING_INITIAL_LATENCY);
+    engine.setSetting(SETTING_SEQUENCE_MS, sequenceMs);
+    engine.setSetting(SETTING_SEEKWINDOW_MS, seekMs);
+    engine.setSetting(SETTING_OVERLAP_MS, overlapMs);
+    const int initial = (int) engine.getSetting(SETTING_INITIAL_LATENCY);
     // SoundTouch exposes its input/output pipeline latency directly. Do not
     // subtract the nominal output sequence: that value describes the internal
     // processing window, not host compensation.
@@ -249,7 +249,8 @@ float PitchForgeAudioProcessor::quantizePitch(float hz)
 float PitchForgeAudioProcessor::getSpeedCoefficient(float speedMs) const
 {
     if(speedMs<=0.0f) return 0.65f;
-    return juce::jlimit(0.002f,0.65f,1.0f-std::exp(-1.0f/(fs*(speedMs*0.001f)+1.0f)));
+    const float coefficient = 1.0f - static_cast<float>(std::exp(-1.0 / (fs * (static_cast<double>(speedMs) * 0.001) + 1.0)));
+    return juce::jlimit(0.002f, 0.65f, coefficient);
 }
 
 void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -273,13 +274,20 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
 
     if (lowLatency != previousLowLatency)
     {
+        // Reconfiguring SoundTouch flushes its internal overlap buffers.
+        // Fade the processed path back in instead of exposing that flush as a
+        // hard discontinuity when the user toggles Low Latency live.
         shifter.setLowLatency(lowLatency);
         doublerShifter.setLowLatency(lowLatency);
+        processedBlend = 0.0f;
         previousLowLatency = lowLatency;
     }
     const int latency = shifter.getLatencySamples();
-    algorithmicLatencySamples.store(latency);
-    setLatencySamples(latency);
+    if (latency != algorithmicLatencySamples.load())
+    {
+        algorithmicLatencySamples.store(latency);
+        setLatencySamples(latency);
+    }
 
     const int stabilizerMs = stabilizer == 1 ? 40 : (stabilizer == 2 ? 80 : (stabilizer == 3 ? 200 : 0));
     const int requiredSamples = (int) (fs * stabilizerMs * 0.001);
@@ -346,10 +354,14 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         shifter.setPitchRatio(finalRatio);
         shifter.putStereo(processIn.data(), frames);
         const int got = shifter.receiveStereo(processOut.data(), frames);
+        // SoundTouch may temporarily return fewer frames while its internal
+        // WSOLA pipeline is replenishing. Never inject zero samples into the
+        // wet path: use the original input as a continuity fallback and let
+        // processedBlend fade back to the delayed dry signal.
         for (int i = got; i < frames; ++i)
         {
-            processOut[(size_t)i * 2] = 0.0f;
-            processOut[(size_t)i * 2 + 1] = 0.0f;
+            processOut[(size_t)i * 2] = processIn[(size_t)i * 2];
+            processOut[(size_t)i * 2 + 1] = processIn[(size_t)i * 2 + 1];
         }
 
         if (doubler && dMix > 0.001f)

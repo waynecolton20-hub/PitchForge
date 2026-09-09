@@ -40,6 +40,10 @@ jobs:
           if ($ps -match 'SmoothPitchShifter') { throw 'Old granular shifter code is still present.' }
           if ($ps -match 'for \(int i=got;i<frames;\+\+i\)') { throw 'Old zero-padding underflow code is still present.' }
 
+      - name: Run source audit
+        shell: pwsh
+        run: ./audit-build.ps1
+
       - name: Configure CMake
         shell: pwsh
         run: |

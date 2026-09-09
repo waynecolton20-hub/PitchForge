@@ -3,6 +3,11 @@ project(PitchForge VERSION 4.0.0)
 
 include(FetchContent)
 
+# Keep downloaded archive extraction timestamps deterministic for CMake 3.31+.
+if(POLICY CMP0135)
+  cmake_policy(SET CMP0135 NEW)
+endif()
+
 FetchContent_Declare(juce
   GIT_REPOSITORY https://github.com/juce-framework/JUCE.git
   GIT_TAG 8.0.8
@@ -16,7 +21,8 @@ set(SOUNDSTRETCH OFF CACHE BOOL "" FORCE)
 set(OPENMP OFF CACHE BOOL "" FORCE)
 set(INTEGER_SAMPLES OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(soundtouch
-  URL https://www.surina.net/soundtouch/soundtouch-2.3.3.tar.gz)
+  URL https://www.surina.net/soundtouch/soundtouch-2.3.3.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(soundtouch)
 
 juce_add_plugin(PitchForge

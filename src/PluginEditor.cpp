@@ -8,7 +8,7 @@ void PitchForgeLookAndFeel::drawRotarySlider(juce::Graphics& g,int x,int y,int w
     auto b=juce::Rectangle<float>((float)x,(float)y,(float)w,(float)h).reduced(6.0f); auto c=b.getCentre(); float r=juce::jmin(b.getWidth(),b.getHeight())*0.43f;
     g.setColour(juce::Colour(0xff0e1117)); g.fillEllipse(c.x-r,c.y-r,2*r,2*r);
     juce::Colour ring(0xff9b61ff); g.setColour(juce::Colour(0xff2c313b)); g.drawEllipse(c.x-r,c.y-r,2*r,2*r,8.0f);
-    juce::Path arc; arc.addCentredArc(c.x,c.y,r,r,r,start,end*pos+start*(1.0f-pos),true); g.setColour(ring); g.strokePath(arc,juce::PathStrokeType(5.0f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
+    juce::Path arc; arc.addCentredArc(c.x,c.y,r,r,r,start,end*pos+start*(1.0f-pos),true); g.setColour(ring); g.strokePath(arc,juce::PathStrokeType(5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     g.setColour(juce::Colour(0xffd8c7ff)); g.fillEllipse(c.x-3,c.y-3,6,6);
 }
 void PitchForgeLookAndFeel::drawToggleButton(juce::Graphics& g,juce::ToggleButton& b,bool highlighted,bool)
@@ -41,13 +41,13 @@ PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioPr
 
     speed.setTextValueSuffix(" ms");
     amount.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    amount.textToValueFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
+    amount.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
     sustain.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    sustain.textToValueFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
+    sustain.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
     mix.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    mix.textToValueFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
+    mix.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
     humanize.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    humanize.textToValueFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
+    humanize.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
     range.setTextValueSuffix(" st");
 
     scale.addItem("Chromatic", 1);
@@ -226,7 +226,7 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
     needle.startNewSubPath(c.x, c.y);
     needle.lineTo(c.x + std::cos(angle) * 88.0f, c.y - std::sin(angle) * 88.0f);
     g.setColour(juce::Colour(0xff7edcff));
-    g.strokePath(needle, juce::PathStrokeType(4.0f, juce::PathStrokeType::rounded));
+    g.strokePath(needle, juce::PathStrokeType(4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
     g.fillEllipse(c.x-5, c.y-5, 10, 10);
 
     const int midi = processor.getDetectedMidi();
