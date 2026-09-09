@@ -1,4 +1,4 @@
-name: Build PitchForge v4.1.8 VST3 (Windows)
+name: Build PitchForge v4.1.9 VST3 (Windows)
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
             if (-not (Test-Path $f)) { throw "Missing required source file: $f" }
           }
           $cm = Get-Content CMakeLists.txt -Raw
-          if ($cm -match '`r`n|`n|`r') { throw 'Literal PowerShell newline escapes found in CMakeLists.txt.' }
+          if ($cm -match '\x60(?:r\x60n|n|r)') { throw 'Literal PowerShell newline escapes found in CMakeLists.txt.' }
           if ($cm -notmatch 'VST3_CAN_REPLACE_VST2\s+FALSE') { throw 'VST3 replacement guard missing.' }
           if ($cm -notmatch 'GIT_REPOSITORY\s+https://github\.com/stenzek/soundtouch\.git') { throw 'GitHub SoundTouch repository missing.' }
           if ($cm -notmatch 'e83424d5928ab8513d2d082779c275765dee31b9') { throw 'Pinned SoundTouch 2.3.3 commit missing.' }
@@ -70,13 +70,13 @@ jobs:
       - name: Package artifact
         shell: pwsh
         run: |
-          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.1.8-Windows-VST3.zip -Force
+          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.1.9-Windows-VST3.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4 # ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: PitchForge-v4.1.8-Windows-VST3
-          path: artifact/PitchForge-v4.1.8-Windows-VST3.zip
+          name: PitchForge-v4.1.9-Windows-VST3
+          path: artifact/PitchForge-v4.1.9-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 30
 

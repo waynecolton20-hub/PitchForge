@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.8'
+Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.9'
 
 $required = @(
     'CMakeLists.txt',
@@ -66,11 +66,11 @@ $checks = @(
     [pscustomobject]@{ Pass = ($wfNormalized -notmatch 'cmake --build build --config Release --parallel 2 2'); Name = 'Malformed duplicate parallel argument is absent' },
     [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
     [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
-    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.8-Windows-VST3\.zip'); Name = 'Final v4.1.8 artifact name is consistent' },
-    [pscustomobject]@{ Pass = ($ps -notmatch '(?i)for\s*\(int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames'); Name = 'Old zero-padding loop form is absent' },
+    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.9-Windows-VST3\.zip'); Name = 'Final v4.1.9 artifact name is consistent' },
+    [pscustomobject]@{ Pass = ($processBody -match 'for\s*\(int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\).*processIn' -and $processBody -notmatch 'for\s*\(int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*i\+\+\\s*\)\s*\{\s*processOut[^;]+\=\s*0\.0f'); Name = 'Underflow loop uses continuity fallback instead of zero padding' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },
-    [pscustomobject]@{ Pass = ($wf -notmatch '`r`n|`n|`r'); Name = 'Workflow has no literal newline escape corruption' }
+    [pscustomobject]@{ Pass = ($wf -notmatch '\x60(?:r\x60n|n|r)'); Name = 'Workflow has no literal PowerShell newline escape text' }
 )
 
 $failed = @($checks | Where-Object { -not $_.Pass })
