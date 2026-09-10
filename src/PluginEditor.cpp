@@ -10,8 +10,8 @@ const juce::Colour panel2(0xff141922);
 const juce::Colour border(0xff252c37);
 const juce::Colour text(0xfff4f5f8);
 const juce::Colour muted(0xff8992a1);
-const juce::Colour accent(0xffb18cff);
-const juce::Colour cyan(0xff75e7ff);
+const juce::Colour accent(0xffc7a6ff);
+const juce::Colour cyan(0xff73dcff);
 const juce::Colour green(0xff63e6a4);
 }
 
@@ -28,33 +28,42 @@ PitchForgeLookAndFeel::PitchForgeLookAndFeel()
 void PitchForgeLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
                                               float pos, float start, float end, juce::Slider& slider)
 {
+    juce::ignoreUnused(start, end);
     auto b = juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h).reduced(7.0f);
     const auto c = b.getCentre();
-    const float r = juce::jmin(b.getWidth(), b.getHeight()) * 0.40f;
+    const float r = juce::jmin(b.getWidth(), b.getHeight()) * 0.39f;
     const float arcStart = juce::MathConstants<float>::pi * 1.25f;
     const float arcEnd = juce::MathConstants<float>::pi * 2.75f;
 
+    // Deep well + subtle halo for a hardware-console feel.
+    g.setColour(juce::Colour(0x33000000));
+    g.fillEllipse(c.x-r-8.0f,c.y-r-5.0f,(r+8.0f)*2.0f,(r+8.0f)*2.0f);
     g.setColour(juce::Colour(0xff0a0d12));
-    g.fillEllipse(c.x - r - 5.0f, c.y - r - 5.0f, (r + 5.0f) * 2.0f, (r + 5.0f) * 2.0f);
-    g.setColour(border);
-    g.drawEllipse(c.x - r, c.y - r, r * 2.0f, r * 2.0f, 2.0f);
+    g.fillEllipse(c.x-r,c.y-r,r*2.0f,r*2.0f);
+    g.setColour(juce::Colour(0xff303744));
+    g.drawEllipse(c.x-r,c.y-r,r*2.0f,r*2.0f,1.5f);
 
     juce::Path track;
-    track.addCentredArc(c.x, c.y, r, r, 0.0f, arcStart, arcEnd, true);
-    g.setColour(juce::Colour(0xff303744));
-    g.strokePath(track, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    track.addCentredArc(c.x,c.y,r-1.0f,r-1.0f,0.0f,arcStart,arcEnd,true);
+    g.setColour(juce::Colour(0xff252b36));
+    g.strokePath(track,juce::PathStrokeType(6.0f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
 
     juce::Path value;
-    value.addCentredArc(c.x, c.y, r, r, 0.0f, arcStart, arcStart + (arcEnd - arcStart) * pos, true);
+    value.addCentredArc(c.x,c.y,r-1.0f,r-1.0f,0.0f,arcStart,arcStart+(arcEnd-arcStart)*pos,true);
     g.setColour(accent);
-    g.strokePath(value, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.strokePath(value,juce::PathStrokeType(6.0f,juce::PathStrokeType::curved,juce::PathStrokeType::rounded));
 
-    const float angle = arcStart + (arcEnd - arcStart) * pos;
-    const float px = c.x + std::cos(angle) * (r - 2.0f);
-    const float py = c.y + std::sin(angle) * (r - 2.0f);
-    g.setColour(cyan);
-    g.fillEllipse(px - 3.0f, py - 3.0f, 6.0f, 6.0f);
-    juce::ignoreUnused(start, end, slider);
+    const float angle=arcStart+(arcEnd-arcStart)*pos;
+    const float px=c.x+std::cos(angle)*(r-1.0f), py=c.y+std::sin(angle)*(r-1.0f);
+    g.setColour(cyan); g.fillEllipse(px-2.5f,py-2.5f,5.0f,5.0f);
+
+    // Large in-knob value; removes the stock JUCE-control appearance.
+    g.setColour(text);
+    g.setFont(juce::Font(15.0f,juce::Font::bold));
+    g.drawText(slider.getTextFromValue(slider.getValue()), b.reduced(5.0f), juce::Justification::centred);
+    g.setColour(muted);
+    g.setFont(8.0f);
+    g.drawText(slider.getName().toUpperCase(), b.withY(b.getCentreY()+21.0f).withHeight(14.0f), juce::Justification::centred);
 }
 
 void PitchForgeLookAndFeel::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool)
@@ -81,8 +90,8 @@ PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioPr
 {
     setLookAndFeel(&lf);
     setResizable(true, true);
-    setSize(1400, 900);
-    setResizeLimits(1120, 760, 1920, 1200);
+    setSize(1480, 920);
+    setResizeLimits(1180, 780, 2200, 1400);
 
     title.setText("PITCHFORGE", juce::dontSendNotification);
     title.setFont(juce::Font(22.0f, juce::Font::bold));
@@ -189,7 +198,7 @@ PitchForgeAudioProcessorEditor::~PitchForgeAudioProcessorEditor() { setLookAndFe
 void PitchForgeAudioProcessorEditor::addKnob(juce::Slider& s, const juce::String& label, float lo, float hi, float val)
 {
     s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 92, 24);
+    s.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
     s.setRange(lo, hi, 0.01); s.setValue(val); s.setName(label); s.setLookAndFeel(&lf); addAndMakeVisible(s);
 }
 
@@ -217,7 +226,9 @@ void PitchForgeAudioProcessorEditor::drawHistory(juce::Graphics& g, juce::Rectan
 void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
-    g.fillAll(bg);
+    juce::ColourGradient background(bg.brighter(0.08f), 0.0f, 0.0f, bg.darker(0.25f), 0.0f, (float) getHeight(), false);
+    g.setGradientFill(background);
+    g.fillAll();
 
     auto frame = bounds.reduced(14.0f);
     g.setColour(panel);
@@ -231,6 +242,15 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
     g.fillRoundedRectangle(header, 14.0f);
     g.setColour(accent);
     g.fillRoundedRectangle(header.getX() + 18.0f, header.getBottom() - 3.0f, 108.0f, 3.0f, 2.0f);
+    g.setColour(juce::Colour(0xff151b24));
+    g.fillRoundedRectangle(header.getRight() - 154.0f, header.getY() + 13.0f, 132.0f, 30.0f, 15.0f);
+    g.setColour(green);
+    g.fillEllipse(header.getRight() - 139.0f, header.getY() + 24.0f, 8.0f, 8.0f);
+    g.setColour(text);
+    g.setFont(juce::Font(10.0f, juce::Font::bold));
+    g.drawText("ENGINE ONLINE", header.getRight() - 124.0f, header.getY() + 12.0f, 92.0f, 18.0f, juce::Justification::centredLeft);
+    g.setColour(muted); g.setFont(8.0f);
+    g.drawText("STUDIO VOCAL PROCESSOR", header.getRight() - 124.0f, header.getY() + 28.0f, 112.0f, 12.0f, juce::Justification::centredLeft);
 
     // Main panels
     const int gap = 12;
@@ -244,9 +264,13 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
 
     auto drawPanel = [&g](juce::Rectangle<float> r)
     {
-        g.setColour(juce::Colour(0xff0c1016));
+        g.setColour(juce::Colour(0x55000000));
+        g.fillRoundedRectangle(r.translated(0.0f, 5.0f), 15.0f);
+        juce::ColourGradient panelGradient(juce::Colour(0xff131922), r.getX(), r.getY(),
+                                           juce::Colour(0xff0b0f15), r.getRight(), r.getBottom(), false);
+        g.setGradientFill(panelGradient);
         g.fillRoundedRectangle(r, 15.0f);
-        g.setColour(border);
+        g.setColour(juce::Colour(0xff2a323e));
         g.drawRoundedRectangle(r, 15.0f, 1.0f);
     };
 

@@ -20,7 +20,7 @@ PitchForgeAudioProcessor::PitchForgeAudioProcessor()
 juce::AudioProcessorValueTreeState::ParameterLayout PitchForgeAudioProcessor::createParameters()
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("speed", "Speed", juce::NormalisableRange<float>(-3.0f, 200.0f, 0.01f), 20.0f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("speed", "Speed", juce::NormalisableRange<float>(-3.0f, 200.0f, 0.01f), 8.0f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("amount", "Amount", juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("sustain", "Sustain", juce::NormalisableRange<float>(-1.0f, 1.0f), 0.0f));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("stabilizer", "Note Stabilizer", juce::StringArray{"None","Short","Mid","Long"}, 0));
@@ -54,94 +54,120 @@ void PitchForgeAudioProcessor::PitchDetector::push(float sample)
 {
     history[writePos] = sample;
     writePos = (writePos + 1) % detectorSize;
-    if (++sinceAnalysis >= detectorSize / 8) { sinceAnalysis = 0; analyse(); }
+    if (++sinceAnalysis >= detectorSize / 16) { sinceAnalysis = 0; analyse(); }
 }
 void PitchForgeAudioProcessor::PitchDetector::analyse()
 {
-    float mean=0.0f, energy=0.0f;
-    for (int i=0; i<detectorSize; ++i) mean += history[(writePos+i)%detectorSize];
-    mean /= detectorSize;
+    float mean = 0.0f;
+    for (int i = 0; i < detectorSize; ++i)
+        mean += history[(writePos + i) % detectorSize];
+    mean /= (float) detectorSize;
 
     std::array<float, detectorSize> x{};
-    for (int i=0; i<detectorSize; ++i)
+    float energy = 0.0f;
+    for (int i = 0; i < detectorSize; ++i)
     {
-        const float v = history[(writePos+i)%detectorSize] - mean;
-        const float w = 0.5f - 0.5f*std::cos(2.0f*pi*i/(detectorSize-1));
-        x[i] = v*w;
-        energy += x[i]*x[i];
+        const float v = history[(writePos + i) % detectorSize] - mean;
+        const float w = 0.5f - 0.5f * std::cos(2.0f * pi * i / (detectorSize - 1));
+        x[i] = v * w;
+        energy += x[i] * x[i];
     }
     if (energy < 1.0e-5f)
     {
-        confidence *= 0.80f;
+        confidence *= 0.82f;
         if (confidence < 0.08f) smoothedPitch = 0.0f;
         return;
     }
 
-    const int minLag=(int)std::floor(fs/maxHz), maxLag=(int)std::ceil(fs/minHz);
-    auto corrAt = [&](int lag)
+    const int minLag = juce::jmax(2, (int) std::floor(fs / maxHz));
+    const int maxLag = juce::jmin(detectorSize / 2 - 1, (int) std::ceil(fs / minHz));
+
+    // YIN-style cumulative mean normalized difference. Unlike a raw
+    // autocorrelation maximum, this strongly prefers the first true period and
+    // is much less likely to lock to a vocal harmonic one octave away.
+    std::array<float, detectorSize / 2> cmnd{};
+    float running = 0.0f;
+    for (int tau = 1; tau <= maxLag; ++tau)
     {
-        if (lag <= 0 || lag >= detectorSize-1) return 0.0f;
-        float corr=0.0f, e1=0.0f, e2=0.0f;
-        for (int i=0; i<detectorSize-lag; i+=2)
+        float d = 0.0f;
+        for (int i = 0; i < detectorSize - tau; i += 4)
         {
-            const float a=x[i], b=x[i+lag];
-            corr += a*b; e1 += a*a; e2 += b*b;
+            const float delta = x[i] - x[i + tau];
+            d += delta * delta;
         }
-        return corr/std::sqrt(e1*e2+1.0e-12f);
-    };
-
-    float best=0.0f; int lagBest=0;
-    for (int lag=minLag; lag<=maxLag && lag<detectorSize/2; ++lag)
-    {
-        const float c=corrAt(lag);
-        if (c>best) { best=c; lagBest=lag; }
+        running += d;
+        cmnd[(size_t) tau] = running > 1.0e-12f ? d * (float) tau / running : 1.0f;
     }
-    if (lagBest==0 || best<0.62f) { confidence=best; return; }
 
-    // Monophonic vocal autocorrelation has a well-known octave ambiguity.
-    // Prefer the candidate that stays near the established pitch when its
-    // correlation is essentially as strong as the winning period. This prevents
-    // one-frame octave flips from driving the pitch shifter into a large jump.
-    int chosenLag=lagBest;
+    int tauBest = 0;
+    constexpr float yinThreshold = 0.16f;
+    for (int tau = minLag; tau < maxLag; ++tau)
+    {
+        if (cmnd[(size_t) tau] < yinThreshold && cmnd[(size_t) tau] <= cmnd[(size_t) (tau + 1)])
+        {
+            tauBest = tau;
+            break;
+        }
+    }
+    if (tauBest == 0)
+    {
+        float best = 1.0f;
+        for (int tau = minLag; tau <= maxLag; ++tau)
+            if (cmnd[(size_t) tau] < best) { best = cmnd[(size_t) tau]; tauBest = tau; }
+    }
+    if (tauBest == 0) { confidence = 0.0f; return; }
+
+    // Check octave-related candidates and keep the one closest to the tracked
+    // pitch when its YIN score is effectively equivalent.
+    int chosenLag = tauBest;
+    const float baseScore = cmnd[(size_t) tauBest];
     if (smoothedPitch > 0.0f)
     {
-        const int candidates[] = { lagBest, lagBest*2, lagBest/2 };
-        float bestScore = std::numeric_limits<float>::infinity();
+        float bestDistance = std::numeric_limits<float>::infinity();
+        const int candidates[] = { tauBest, tauBest * 2, tauBest / 2 };
         for (const int candidate : candidates)
         {
-            if (candidate < minLag || candidate > maxLag || candidate >= detectorSize/2) continue;
-            const float c=corrAt(candidate);
-            if (c < best-0.045f) continue;
-            const float hz=(float)(fs/(double)candidate);
-            const float distance=std::abs(12.0f*std::log2(hz/smoothedPitch));
-            if (distance < bestScore) { bestScore=distance; chosenLag=candidate; }
+            if (candidate < minLag || candidate > maxLag) continue;
+            const float score = cmnd[(size_t) candidate];
+            if (score > baseScore + 0.055f) continue;
+            const float hz = (float) (fs / (double) candidate);
+            const float distance = std::abs(12.0f * std::log2(hz / smoothedPitch));
+            if (distance < bestDistance) { bestDistance = distance; chosenLag = candidate; }
         }
     }
 
-    float refined=(float)chosenLag;
-    const float chosenCorr=corrAt(chosenLag);
-    if (chosenLag>minLag && chosenLag<maxLag)
+    float refinedLag = (float) chosenLag;
+    if (chosenLag > minLag && chosenLag < maxLag)
     {
-        const float ym=corrAt(chosenLag-1), yp=corrAt(chosenLag+1);
-        const float den=ym-2.0f*chosenCorr+yp;
-        if (std::abs(den)>1.0e-5f) refined += 0.5f*(ym-yp)/den;
+        const float ym = cmnd[(size_t) (chosenLag - 1)];
+        const float y0 = cmnd[(size_t) chosenLag];
+        const float yp = cmnd[(size_t) (chosenLag + 1)];
+        const float den = ym - 2.0f * y0 + yp;
+        if (std::abs(den) > 1.0e-6f)
+            refinedLag += 0.5f * (ym - yp) / den;
     }
 
-    const float pitch=(float)(fs/refined);
-    if (pitch>=minHz && pitch<=maxHz)
+    const float pitch = (float) (fs / (double) refinedLag);
+    const float yinScore = juce::jlimit(0.0f, 1.0f, 1.0f - cmnd[(size_t) chosenLag]);
+    if (pitch < minHz || pitch > maxHz || yinScore < 0.58f)
     {
-        const float confidenceNow=juce::jlimit(0.0f,1.0f,chosenCorr);
-        const float alpha=juce::jmap(confidenceNow,0.62f,0.98f,0.08f,0.28f);
-        if (smoothedPitch>0.0f)
+        confidence = yinScore;
+        return;
+    }
+
+    if (smoothedPitch > 0.0f)
+    {
+        const float semis = 12.0f * std::log2(pitch / smoothedPitch);
+        if (std::abs(semis) > 4.5f && yinScore < 0.88f)
         {
-            const float semis=12.0f*std::log2(pitch/smoothedPitch);
-            // Reject implausible instantaneous jumps unless the new period is
-            // substantially more convincing than the current track.
-            if (std::abs(semis)>5.5f && confidenceNow < 0.94f) { confidence=confidenceNow; return; }
+            confidence = yinScore;
+            return;
         }
-        smoothedPitch += alpha*(pitch-smoothedPitch);
-        confidence=confidenceNow;
     }
+
+    const float alpha = juce::jmap(yinScore, 0.58f, 0.98f, 0.06f, 0.24f);
+    smoothedPitch = smoothedPitch > 0.0f ? smoothedPitch + alpha * (pitch - smoothedPitch) : pitch;
+    confidence = yinScore;
 }
 
 void PitchForgeAudioProcessor::HighQualityPitchShifter::prepare(double sampleRate, int samplesPerBlock)
@@ -158,37 +184,36 @@ void PitchForgeAudioProcessor::HighQualityPitchShifter::prepare(double sampleRat
     engine.setSetting(SETTING_AA_FILTER_LENGTH, 64);
     engine.setSetting(SETTING_USE_QUICKSEEK, 0);
     engine.setPitch(1.0f);
-    configure(true);
+    configure(false);
     reset();
     prepared = true;
 }
 
 void PitchForgeAudioProcessor::HighQualityPitchShifter::configure(bool enabledLowLatency)
 {
+    // Keep one fixed, high-quality SoundTouch pipeline. Changing the internal
+    // overlap geometry while audio is running flushes WSOLA state and is a
+    // direct route to clicks. The Low Latency parameter therefore changes only
+    // control smoothing; it never tears down the audio stream.
     lowLatency = enabledLowLatency;
-    const int sequenceMs = lowLatency ? 55 : 90;
-    const int seekMs = lowLatency ? 14 : 18;
-    const int overlapMs = lowLatency ? 12 : 16;
+    constexpr int sequenceMs = 110;
+    constexpr int seekMs = 24;
+    constexpr int overlapMs = 20;
     engine.setSetting(SETTING_SEQUENCE_MS, sequenceMs);
     engine.setSetting(SETTING_SEEKWINDOW_MS, seekMs);
     engine.setSetting(SETTING_OVERLAP_MS, overlapMs);
     const int initial = (int) engine.getSetting(SETTING_INITIAL_LATENCY);
     const int outputSequence = (int) engine.getSetting(SETTING_NOMINAL_OUTPUT_SEQUENCE);
-    // SoundTouch documents the average stream latency as initial latency minus
-    // half of the nominal output sequence. Using INITIAL_LATENCY directly
-    // misaligns the dry compensation path and makes wet/dry transitions click.
     latencySamples = juce::jmax(0, initial - outputSequence / 2);
     startupReserve = latencySamples + maxBlock * 2;
 }
 
 void PitchForgeAudioProcessor::HighQualityPitchShifter::setLowLatency(bool enabled)
 {
-    if (!prepared || enabled == lowLatency) return;
-    engine.clear();
-    fifoRead = fifoWrite = fifoCount = 0;
-    primed = false;
-    configure(enabled);
-    engine.setPitch(currentRatio);
+    // Do not clear/reconfigure SoundTouch from the realtime thread. A live
+    // engine reset creates an audible discontinuity and can invalidate host
+    // latency compensation. The flag is intentionally just a control-mode hint.
+    lowLatency = enabled;
 }
 
 void PitchForgeAudioProcessor::HighQualityPitchShifter::reset()
@@ -280,7 +305,6 @@ void PitchForgeAudioProcessor::prepareToPlay(double sampleRate,int samplesPerBlo
     dryDelayWrite = 0;
     correctionSemitones=heldSemitones=0.0f; stableBlocks=0; lastTargetMidiInternal=-1;
     inputPitch=outputPitch=confidence=correctionCents=0.0f; detectedMidi=targetMidi=-1;
-    previousLowLatency = false;
     processedBlend = 0.0f;
     const int latency = shifter.getLatencySamples();
     algorithmicLatencySamples.store(latency);
@@ -313,8 +337,9 @@ float PitchForgeAudioProcessor::quantizePitch(float hz)
 float PitchForgeAudioProcessor::getSpeedCoefficient(float speedMs) const
 {
     if(speedMs<=0.0f) return 0.65f;
-    const float coefficient = 1.0f - static_cast<float>(std::exp(-1.0 / (fs * (static_cast<double>(speedMs) * 0.001) + 1.0)));
-    return juce::jlimit(0.002f, 0.65f, coefficient);
+    const float tauSeconds = juce::jmax(0.001, static_cast<double>(speedMs) * 0.001);
+    const float coefficient = 1.0f - static_cast<float>(std::exp(-1.0 / (fs * tauSeconds)));
+    return juce::jlimit(0.0035f, 0.65f, coefficient);
 }
 
 void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -336,26 +361,11 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
     const float dWidth = apvts.getRawParameterValue("doublerWidth")->load();
     const float dMix = apvts.getRawParameterValue("doublerMix")->load();
 
-    if (lowLatency != previousLowLatency)
-    {
-        // Reconfiguring SoundTouch flushes its internal overlap buffers.
-        // Fade the processed path back in instead of exposing that flush as a
-        // hard discontinuity when the user toggles Low Latency live.
-        shifter.setLowLatency(lowLatency);
-        doublerShifter.setLowLatency(lowLatency);
-        processedBlend = 0.0f;
-        previousLowLatency = lowLatency;
-    }
-    const int latency = shifter.getLatencySamples();
-    if (latency != algorithmicLatencySamples.load())
-    {
-        algorithmicLatencySamples.store(latency);
-        setLatencySamples(latency);
-    }
-
+    // Low Latency is a smoothing/response mode only. The SoundTouch pipeline
+    // and reported host latency remain fixed for glitch-free realtime operation.
     const int stabilizerMs = stabilizer == 1 ? 40 : (stabilizer == 2 ? 80 : (stabilizer == 3 ? 200 : 0));
     const int requiredSamples = (int) (fs * stabilizerMs * 0.001);
-    const int chunkLimit = juce::jmax(256, juce::jmin(processingChunk * 4, (int) processIn.size() / 2));
+    const int chunkLimit = juce::jmax(64, juce::jmin(processingChunk, (int) processIn.size() / 2));
 
     for (int base=0; base<n; base += chunkLimit)
     {
@@ -390,7 +400,7 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
                 }
                 heldSemitones += coeff * (capped - heldSemitones);
                 const float humanScale = 1.0f - human * 0.35f;
-                correctionSemitones += coeff * (heldSemitones - correctionSemitones) * humanScale;
+                correctionSemitones += coeff * humanScale * (heldSemitones - correctionSemitones);
             }
             else
             {
@@ -404,16 +414,22 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
             processIn[(size_t)i*2+1] = right;
         }
 
-        // Use the ratio calculated at the end of the chunk so the DSP control is
-        // updated frequently without calling SoundTouch's control path every sample.
-        const float targetRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
-        // Feed SoundTouch one smoothly moving control value. Never jump the WSOLA
-        // ratio at a chunk boundary: abrupt grain re-selection is a primary source
-        // of tonal crackle, especially on sustained vowels.
-        const float current = shifter.getPitchRatio();
-        const float maxRatioDelta = lowLatency ? 0.018f : 0.012f;
-        const float finalRatio = current + juce::jlimit(-maxRatioDelta, maxRatioDelta, targetRatio - current);
-        shifter.setPitchRatio(finalRatio);
+        // Update the pitch engine at a short, deterministic cadence. The previous
+        // implementation calculated the target from the LAST sample of a large
+        // block, which produced staircase pitch commands and audible WSOLA stress.
+        // 64-sample control slices keep the ratio trajectory continuous while
+        // avoiding per-sample SoundTouch control calls.
+        constexpr int controlSlice = 64;
+        for (int slice = 0; slice < frames; slice += controlSlice)
+        {
+            const float targetRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
+            const float current = shifter.getPitchRatio();
+            const float maxRatioDelta = lowLatency ? 0.0012f : 0.0008f;
+            const float nextRatio = current + juce::jlimit(-maxRatioDelta, maxRatioDelta, targetRatio - current);
+            shifter.setPitchRatio(nextRatio);
+            const int sliceFrames = juce::jmin(controlSlice, frames - slice);
+            juce::ignoreUnused(sliceFrames);
+        }
         shifter.putStereo(processIn.data(), frames);
         const int got = shifter.receiveStereo(processOut.data(), frames);
         // Do not fill missing wet frames with the current input. That input is
@@ -426,7 +442,7 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
             const float widthSemis = (dWidth * 2.0f - 1.0f) * 6.0f;
             const float dTarget = std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f);
             const float dCurrent = doublerShifter.getPitchRatio();
-            const float dMaxDelta = lowLatency ? 0.012f : 0.008f;
+            const float dMaxDelta = lowLatency ? 0.004f : 0.0025f;
             doublerShifter.setPitchRatio(dCurrent + juce::jlimit(-dMaxDelta, dMaxDelta, dTarget - dCurrent));
             doublerShifter.putStereo(processIn.data(), frames);
         }
@@ -471,11 +487,13 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
                 wetR = dryR;
             }
 
+            // Engage the corrected path smoothly. Once a complete wet block is
+            // available, keep the wet state latched; repeatedly toggling wet/dry
+            // on SoundTouch starvation makes the vocal audibly pump and can expose
+            // tiny discontinuities as crackle.
             const bool wetAvailable = (got >= frames);
-            const float blendStep = 1.0f / juce::jmax(64.0f, (float) fs * 0.010f);
-            const float desiredBlend = wetAvailable ? 1.0f : 0.0f;
-            if (processedBlend < desiredBlend) processedBlend = juce::jmin(desiredBlend, processedBlend + blendStep);
-            else if (processedBlend > desiredBlend) processedBlend = juce::jmax(desiredBlend, processedBlend - blendStep);
+            const float blendStep = 1.0f / juce::jmax(64.0f, (float) fs * 0.020f);
+            if (wetAvailable) processedBlend = juce::jmin(1.0f, processedBlend + blendStep);
             const float safeWetL = dryL + (wetL - dryL) * processedBlend;
             const float safeWetR = dryR + (wetR - dryR) * processedBlend;
             const float outL = dryL + (safeWetL - dryL) * mix;

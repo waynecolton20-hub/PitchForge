@@ -43,7 +43,7 @@ public:
 
 private:
     static constexpr int detectorSize = 2048;
-    static constexpr int processingChunk = 512;
+    static constexpr int processingChunk = 128;
     static constexpr int fifoCapacityFrames = 65536;
     static constexpr float pi = 3.14159265358979323846f;
     static constexpr float minHz = 70.0f;
@@ -97,7 +97,7 @@ private:
         int maxBlock = 512;
         int latencySamples = 0;
         bool prepared = false;
-        bool lowLatency = true;
+        bool lowLatency = false;
         bool primed = false;
         float currentRatio = 1.0f;
         void pushFifo(const float* samples, int frames);
@@ -115,7 +115,6 @@ private:
     float heldSemitones = 0.0f;
     int stableBlocks = 0;
     int lastTargetMidiInternal = -1;
-    bool previousLowLatency = true;
 
     std::vector<float> processIn;
     std::vector<float> processOut;
