@@ -277,7 +277,7 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
     {
         auto rr = knob->getBounds().toFloat().expanded(8.0f, 12.0f);
         g.setColour(panel2); g.fillRoundedRectangle(rr, 12.0f);
-        g.setColour(borderSoft); g.drawRoundedRectangle(rr, 12.0f, 1.0f);
+        g.setColour(border); g.drawRoundedRectangle(rr, 12.0f, 1.0f);
     }
 
     const float cents = processor.getCorrectionCents();
@@ -312,7 +312,7 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
     for (auto& cInfo : controls)
     {
         auto rr = cInfo.slider->getBounds().toFloat().expanded(4.0f, 10.0f);
-        g.setColour(text); g.setFont(10.0f, juce::Font::bold);
+        g.setColour(text); g.setFont(juce::Font(10.0f, juce::Font::bold));
         g.drawText(cInfo.title, rr.getX(), rr.getY() - 14.0f, rr.getWidth(), 13.0f, juce::Justification::centred);
         g.setColour(muted); g.setFont(8.5f);
         g.drawText(cInfo.body, rr.getX(), rr.getBottom() - 12.0f, rr.getWidth(), 12.0f, juce::Justification::centred);
