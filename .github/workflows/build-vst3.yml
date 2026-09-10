@@ -1,4 +1,4 @@
-name: Build PitchForge v4.3.1 VST3 (Windows)
+name: Build PitchForge v4.4.0 VST3 (Windows)
 
 on:
   push:
@@ -70,13 +70,13 @@ jobs:
       - name: Package artifact
         shell: pwsh
         run: |
-          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.3.1-Windows-VST3.zip -Force
+          Compress-Archive -Path artifact/PitchForge.vst3 -DestinationPath artifact/PitchForge-v4.4.0-Windows-VST3.zip -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4 # ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: PitchForge-v4.3.1-Windows-VST3
-          path: artifact/PitchForge-v4.3.1-Windows-VST3.zip
+          name: PitchForge-v4.4.0-Windows-VST3
+          path: artifact/PitchForge-v4.4.0-Windows-VST3.zip
           if-no-files-found: error
           retention-days: 30
 

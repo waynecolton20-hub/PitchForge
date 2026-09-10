@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <limits>
 
 namespace {
 constexpr float pi = 3.14159265358979323846f;
@@ -23,7 +24,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchForgeAudioProcessor::cr
     p.push_back(std::make_unique<juce::AudioParameterFloat>("amount", "Amount", juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("sustain", "Sustain", juce::NormalisableRange<float>(-1.0f, 1.0f), 0.0f));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("stabilizer", "Note Stabilizer", juce::StringArray{"None","Short","Mid","Long"}, 0));
-    p.push_back(std::make_unique<juce::AudioParameterBool>("lowLatency", "Low Latency", true));
+    p.push_back(std::make_unique<juce::AudioParameterBool>("lowLatency", "Low Latency", false));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("humanize", "Humanize", juce::NormalisableRange<float>(0.0f, 1.0f), 0.10f));
     p.push_back(std::make_unique<juce::AudioParameterFloat>("mix", "Mix", juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("scale", "Scale", juce::StringArray{"Chromatic","Major","Minor"}, 1));
@@ -58,29 +59,88 @@ void PitchForgeAudioProcessor::PitchDetector::push(float sample)
 void PitchForgeAudioProcessor::PitchDetector::analyse()
 {
     float mean=0.0f, energy=0.0f;
-    for(int i=0;i<detectorSize;++i) mean += history[(writePos+i)%detectorSize];
+    for (int i=0; i<detectorSize; ++i) mean += history[(writePos+i)%detectorSize];
     mean /= detectorSize;
+
     std::array<float, detectorSize> x{};
-    for(int i=0;i<detectorSize;++i){ float v=history[(writePos+i)%detectorSize]-mean; float w=0.5f-0.5f*std::cos(2.0f*pi*i/(detectorSize-1)); x[i]=v*w; energy += x[i]*x[i]; }
-    if(energy < 1.0e-5f){ confidence *= 0.80f; if(confidence<0.08f) smoothedPitch=0.0f; return; }
+    for (int i=0; i<detectorSize; ++i)
+    {
+        const float v = history[(writePos+i)%detectorSize] - mean;
+        const float w = 0.5f - 0.5f*std::cos(2.0f*pi*i/(detectorSize-1));
+        x[i] = v*w;
+        energy += x[i]*x[i];
+    }
+    if (energy < 1.0e-5f)
+    {
+        confidence *= 0.80f;
+        if (confidence < 0.08f) smoothedPitch = 0.0f;
+        return;
+    }
 
     const int minLag=(int)std::floor(fs/maxHz), maxLag=(int)std::ceil(fs/minHz);
+    auto corrAt = [&](int lag)
+    {
+        if (lag <= 0 || lag >= detectorSize-1) return 0.0f;
+        float corr=0.0f, e1=0.0f, e2=0.0f;
+        for (int i=0; i<detectorSize-lag; i+=2)
+        {
+            const float a=x[i], b=x[i+lag];
+            corr += a*b; e1 += a*a; e2 += b*b;
+        }
+        return corr/std::sqrt(e1*e2+1.0e-12f);
+    };
+
     float best=0.0f; int lagBest=0;
-    for(int lag=minLag; lag<=maxLag && lag<detectorSize/2; ++lag){
-        float corr=0,e1=0,e2=0;
-        for(int i=0;i<detectorSize-lag;i+=2){ float a=x[i],b=x[i+lag]; corr+=a*b; e1+=a*a; e2+=b*b; }
-        float c=corr/std::sqrt(e1*e2+1e-12f);
-        if(c>best){best=c;lagBest=lag;}
+    for (int lag=minLag; lag<=maxLag && lag<detectorSize/2; ++lag)
+    {
+        const float c=corrAt(lag);
+        if (c>best) { best=c; lagBest=lag; }
     }
-    if(lagBest==0 || best<0.62f){ confidence=best; return; }
-    auto corrAt=[&](int lag){ float c=0,e1=0,e2=0; for(int i=0;i<detectorSize-lag;i+=2){float a=x[i],b=x[i+lag];c+=a*b;e1+=a*a;e2+=b*b;} return c/std::sqrt(e1*e2+1e-12f); };
-    float refined=(float)lagBest;
-    if(lagBest>minLag && lagBest<maxLag){ float ym=corrAt(lagBest-1), yp=corrAt(lagBest+1), den=ym-2*best+yp; if(std::abs(den)>1e-5f) refined += 0.5f*(ym-yp)/den; }
-    float pitch=(float)(fs/refined);
-    if(pitch>=minHz && pitch<=maxHz){
-        float alpha=juce::jmap(best,0.62f,0.98f,0.10f,0.35f);
-        if(smoothedPitch>0.0f){ float semis=12.0f*std::log2(pitch/smoothedPitch); if(std::abs(semis)>7.0f && best<0.88f) pitch=smoothedPitch; }
-        smoothedPitch += alpha*(pitch-smoothedPitch); confidence=best;
+    if (lagBest==0 || best<0.62f) { confidence=best; return; }
+
+    // Monophonic vocal autocorrelation has a well-known octave ambiguity.
+    // Prefer the candidate that stays near the established pitch when its
+    // correlation is essentially as strong as the winning period. This prevents
+    // one-frame octave flips from driving the pitch shifter into a large jump.
+    int chosenLag=lagBest;
+    if (smoothedPitch > 0.0f)
+    {
+        const int candidates[] = { lagBest, lagBest*2, lagBest/2 };
+        float bestScore = std::numeric_limits<float>::infinity();
+        for (const int candidate : candidates)
+        {
+            if (candidate < minLag || candidate > maxLag || candidate >= detectorSize/2) continue;
+            const float c=corrAt(candidate);
+            if (c < best-0.045f) continue;
+            const float hz=(float)(fs/(double)candidate);
+            const float distance=std::abs(12.0f*std::log2(hz/smoothedPitch));
+            if (distance < bestScore) { bestScore=distance; chosenLag=candidate; }
+        }
+    }
+
+    float refined=(float)chosenLag;
+    const float chosenCorr=corrAt(chosenLag);
+    if (chosenLag>minLag && chosenLag<maxLag)
+    {
+        const float ym=corrAt(chosenLag-1), yp=corrAt(chosenLag+1);
+        const float den=ym-2.0f*chosenCorr+yp;
+        if (std::abs(den)>1.0e-5f) refined += 0.5f*(ym-yp)/den;
+    }
+
+    const float pitch=(float)(fs/refined);
+    if (pitch>=minHz && pitch<=maxHz)
+    {
+        const float confidenceNow=juce::jlimit(0.0f,1.0f,chosenCorr);
+        const float alpha=juce::jmap(confidenceNow,0.62f,0.98f,0.08f,0.28f);
+        if (smoothedPitch>0.0f)
+        {
+            const float semis=12.0f*std::log2(pitch/smoothedPitch);
+            // Reject implausible instantaneous jumps unless the new period is
+            // substantially more convincing than the current track.
+            if (std::abs(semis)>5.5f && confidenceNow < 0.94f) { confidence=confidenceNow; return; }
+        }
+        smoothedPitch += alpha*(pitch-smoothedPitch);
+        confidence=confidenceNow;
     }
 }
 
@@ -106,17 +166,18 @@ void PitchForgeAudioProcessor::HighQualityPitchShifter::prepare(double sampleRat
 void PitchForgeAudioProcessor::HighQualityPitchShifter::configure(bool enabledLowLatency)
 {
     lowLatency = enabledLowLatency;
-    const int sequenceMs = lowLatency ? 45 : 70;
-    const int seekMs = lowLatency ? 18 : 28;
+    const int sequenceMs = lowLatency ? 55 : 90;
+    const int seekMs = lowLatency ? 14 : 18;
     const int overlapMs = lowLatency ? 12 : 16;
     engine.setSetting(SETTING_SEQUENCE_MS, sequenceMs);
     engine.setSetting(SETTING_SEEKWINDOW_MS, seekMs);
     engine.setSetting(SETTING_OVERLAP_MS, overlapMs);
     const int initial = (int) engine.getSetting(SETTING_INITIAL_LATENCY);
-    // SoundTouch exposes its input/output pipeline latency directly. Do not
-    // subtract the nominal output sequence: that value describes the internal
-    // processing window, not host compensation.
-    latencySamples = juce::jmax(0, initial);
+    const int outputSequence = (int) engine.getSetting(SETTING_NOMINAL_OUTPUT_SEQUENCE);
+    // SoundTouch documents the average stream latency as initial latency minus
+    // half of the nominal output sequence. Using INITIAL_LATENCY directly
+    // misaligns the dry compensation path and makes wet/dry transitions click.
+    latencySamples = juce::jmax(0, initial - outputSequence / 2);
     startupReserve = latencySamples + maxBlock * 2;
 }
 
@@ -168,15 +229,18 @@ void PitchForgeAudioProcessor::HighQualityPitchShifter::pushFifo(const float* sa
 
 int PitchForgeAudioProcessor::HighQualityPitchShifter::popFifo(float* samples, int frames)
 {
-    const int available = (int) juce::jmin((size_t) frames, fifoCount);
-    for (int i=0;i<available;++i)
+    // Never return a partial wet block. Splicing N wet samples followed by dry
+    // samples inside the same host block creates a literal time-domain step.
+    // Hold the FIFO intact until a complete block is available.
+    if (fifoCount < (size_t) frames) return 0;
+    for (int i=0;i<frames;++i)
     {
         samples[i*2] = fifo[fifoRead];
         samples[i*2+1] = fifo[(fifoRead+1)%fifo.size()];
         fifoRead = (fifoRead + 2) % fifo.size();
     }
-    fifoCount -= (size_t) available;
-    return available;
+    fifoCount -= (size_t) frames;
+    return frames;
 }
 
 void PitchForgeAudioProcessor::HighQualityPitchShifter::drainOutput()
@@ -216,7 +280,7 @@ void PitchForgeAudioProcessor::prepareToPlay(double sampleRate,int samplesPerBlo
     dryDelayWrite = 0;
     correctionSemitones=heldSemitones=0.0f; stableBlocks=0; lastTargetMidiInternal=-1;
     inputPitch=outputPitch=confidence=correctionCents=0.0f; detectedMidi=targetMidi=-1;
-    previousLowLatency = true;
+    previousLowLatency = false;
     processedBlend = 0.0f;
     const int latency = shifter.getLatencySamples();
     algorithmicLatencySamples.store(latency);
@@ -347,7 +411,7 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         // ratio at a chunk boundary: abrupt grain re-selection is a primary source
         // of tonal crackle, especially on sustained vowels.
         const float current = shifter.getPitchRatio();
-        const float maxRatioDelta = 0.00075f * (float) frames;
+        const float maxRatioDelta = lowLatency ? 0.018f : 0.012f;
         const float finalRatio = current + juce::jlimit(-maxRatioDelta, maxRatioDelta, targetRatio - current);
         shifter.setPitchRatio(finalRatio);
         shifter.putStereo(processIn.data(), frames);
@@ -362,7 +426,7 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
             const float widthSemis = (dWidth * 2.0f - 1.0f) * 6.0f;
             const float dTarget = std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f);
             const float dCurrent = doublerShifter.getPitchRatio();
-            const float dMaxDelta = 0.00055f * (float) frames;
+            const float dMaxDelta = lowLatency ? 0.012f : 0.008f;
             doublerShifter.setPitchRatio(dCurrent + juce::jlimit(-dMaxDelta, dMaxDelta, dTarget - dCurrent));
             doublerShifter.putStereo(processIn.data(), frames);
         }
@@ -401,14 +465,14 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
             // Instead, crossfade the wet path toward the latency-aligned dry path
             // over several milliseconds and recover just as smoothly. This masks
             // the exact discontinuity that previously produced audible crackle.
-            if (i >= got)
+            if (got == 0)
             {
                 wetL = dryL;
                 wetR = dryR;
             }
 
             const bool wetAvailable = (got >= frames);
-            const float blendStep = 1.0f / juce::jmax(64.0f, (float) fs * 0.006f);
+            const float blendStep = 1.0f / juce::jmax(64.0f, (float) fs * 0.010f);
             const float desiredBlend = wetAvailable ? 1.0f : 0.0f;
             if (processedBlend < desiredBlend) processedBlend = juce::jmin(desiredBlend, processedBlend + blendStep);
             else if (processedBlend > desiredBlend) processedBlend = juce::jmax(desiredBlend, processedBlend - blendStep);

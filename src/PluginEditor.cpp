@@ -130,6 +130,7 @@ PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioPr
     };
     addToggle(chromatic, "Chromatic");
     addToggle(lowLatency, "Low Latency");
+    lowLatency.setTooltip("LOW LATENCY — reduces monitoring delay, but QUALITY mode is the recommended setting for the cleanest sustained vocals.");
     addToggle(detected, "Detected Notes");
     addToggle(heatmap, "HeatMap");
     addToggle(doubler, "Doubler");
@@ -464,7 +465,7 @@ void PitchForgeAudioProcessorEditor::timerCallback()
     confidenceLabel.setText("Confidence  " + juce::String(conf * 100.0f, 0) + "%    •    Correction  " + juce::String(cents, 1) + " cents", juce::dontSendNotification);
     const bool ll = processor.getAPVTS().getRawParameterValue("lowLatency")->load() > 0.5f;
     const int stab = (int)processor.getAPVTS().getRawParameterValue("stabilizer")->load();
-    latencyLabel.setText(ll ? "LOW LATENCY" : (stab > 0 ? "STABILIZED" : "TRACKING"), juce::dontSendNotification);
+    latencyLabel.setText(ll ? "LOW LATENCY" : (stab > 0 ? "QUALITY / STABILIZED" : "QUALITY / TRACKING"), juce::dontSendNotification);
     pitchLabel.setText("In  " + juce::String(processor.getInputPitchHz(), 1) + " Hz", juce::dontSendNotification);
     outputLabel.setText("Out  " + juce::String(processor.getOutputPitchHz(), 1) + " Hz", juce::dontSendNotification);
 

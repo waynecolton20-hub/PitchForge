@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Write-Host 'PITCHFORGE SOURCE AUDIT v4.3.1'
+Write-Host 'PITCHFORGE SOURCE AUDIT v4.4.0'
 
 $required = @(
     'CMakeLists.txt',
@@ -48,16 +48,23 @@ $checks = @(
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_SEQUENCE_MS,\s*sequenceMs\)'); Name = 'SoundTouch sequence setting is present' },
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_SEEKWINDOW_MS,\s*seekMs\)'); Name = 'SoundTouch seek-window setting is present' },
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_OVERLAP_MS,\s*overlapMs\)'); Name = 'SoundTouch overlap setting is present' },
-    [pscustomobject]@{ Pass = ($ps -match 'engine\.getSetting\(SETTING_INITIAL_LATENCY\)'); Name = 'SoundTouch initial latency query is present' },
+    [pscustomobject]@{ Pass = ($ps -match 'engine\.getSetting\(SETTING_INITIAL_LATENCY\)' -and $ps -match 'engine\.getSetting\(SETTING_NOMINAL_OUTPUT_SEQUENCE\)'); Name = 'SoundTouch average-latency compensation uses initial and nominal output latency' },
     [pscustomobject]@{ Pass = ($ps -notmatch '(?s)AudioParameterFloat\([^;]*?,\s*[-+]?\d+(?:\.\d+)?f\s*,\s*[-+]?\d+(?:\.\d+)?f'); Name = 'All AudioParameterFloat ranges use JUCE 8 NormalisableRange' },
     [pscustomobject]@{ Pass = ($ed -notmatch 'textToValueFunction'); Name = 'JUCE Slider parser uses valueFromTextFunction' },
     [pscustomobject]@{ Pass = ($ed -match 'PathStrokeType\(4\.0f,\s*juce::PathStrokeType::curved,\s*juce::PathStrokeType::rounded\)'); Name = 'Needle stroke constructor uses valid JUCE signature' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'SmoothPitchShifter'); Name = 'Legacy granular shifter is absent' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'processOut\[\(size_t\)i \* 2\] = 0\.0f'); Name = 'No hard-zero wet-output fallback remains' },
-    [pscustomobject]@{ Pass = ($processBody -match '(?s)if\s*\(i\s*>=\s*got\s*\).*?wetL\s*=\s*dryL.*?wetR\s*=\s*dryR'); Name = 'Wet underflow falls back to latency-aligned dry' },
+    [pscustomobject]@{ Pass = ($processBody -match '(?s)if\s*\(got\s*==\s*0\s*\).*?wetL\s*=\s*dryL.*?wetR\s*=\s*dryR'); Name = 'Wet underflow falls back to latency-aligned dry' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'processOut\[\(size_t\)i \* 2\] = processIn\[\(size_t\)i \* 2\]'); Name = 'Wet underflow never copies undelayed input into wet path' },
     [pscustomobject]@{ Pass = ($processBody -notmatch '(?i)(new\s+\w+|delete\s+|std::malloc|std::free|\.resize\s*\(|\.assign\s*\(|std::vector\s*<[^>]+>\s+\w+\s*[;=]|std::string\s+\w+\s*[;=]|juce::String\s+\w+\s*[;=]|make_unique|make_shared|lock_guard|ScopedLock|CriticalSection|MessageManagerLock|Logger::|juce::File|std::cout|std::cerr)'); Name = 'processBlock has no obvious realtime-allocation/locking/I-O operations' },
     [pscustomobject]@{ Pass = ($processBody -match 'shifter\.putStereo\(processIn\.data\(\), frames\)'); Name = 'processBlock feeds the primary shifter' },
+    [pscustomobject]@{ Pass = ($ps -match 'if\s*\(fifoCount < \(size_t\) frames\) return 0;'); Name = 'Primary shifter never returns partial wet blocks' },
+    [pscustomobject]@{ Pass = ($ps -match 'const float maxRatioDelta = lowLatency \? 0\.018f : 0\.012f;'); Name = 'Primary pitch ratio slew is bounded to a safe per-block delta' },
+    [pscustomobject]@{ Pass = ($ps -match 'const float dMaxDelta = lowLatency \? 0\.012f : 0\.008f;'); Name = 'Doubler pitch ratio slew is bounded to a safe per-block delta' },
+    [pscustomobject]@{ Pass = ($ps -notmatch '0\.00075f \* \(float\) frames|0\.00055f \* \(float\) frames'); Name = 'Legacy oversized ratio slew coefficients are absent' },
+    [pscustomobject]@{ Pass = ($ps -match 'AudioParameterBool>\(\"lowLatency\", \"Low Latency\", false\)'); Name = 'Quality mode is the default instead of low-latency mode' },
+    [pscustomobject]@{ Pass = ($ps -match 'std::numeric_limits<float>::infinity\(\)' -and $ps -match 'lagBest\*2' -and $ps -match 'lagBest/2'); Name = 'Detector has octave-ambiguity protection' },
+    [pscustomobject]@{ Pass = ($ed -match 'QUALITY mode is the recommended setting'); Name = 'UI explains the quality-first mode' },
     [pscustomobject]@{ Pass = ($processBody -match 'shifter\.receiveStereo\(processOut\.data\(\), frames\)'); Name = 'processBlock drains the primary shifter' },
     [pscustomobject]@{ Pass = ($processBody -match 'const int got = shifter\.receiveStereo'); Name = 'Primary output availability is tracked' },
     [pscustomobject]@{ Pass = ($wf -match 'runs-on:\s*windows-2022'); Name = 'Windows 2022 runner is selected' },
@@ -68,7 +75,7 @@ $checks = @(
     [pscustomobject]@{ Pass = ($wfNormalized -notmatch 'cmake --build build --config Release --parallel 2 2'); Name = 'Malformed duplicate parallel argument is absent' },
     [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
     [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
-    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.3\.1-Windows-VST3\.zip'); Name = 'Final v4.3.1 artifact name is consistent' },
+    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.4\.0-Windows-VST3\.zip'); Name = 'Final v4.4.0 artifact name is consistent' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },
     [pscustomobject]@{ Pass = ($wf -notmatch '\x60(?:r\x60n|n|r)'); Name = 'Workflow has no literal PowerShell newline escape text' }
