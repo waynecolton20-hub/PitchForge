@@ -409,6 +409,7 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
             }
 
             const float applied = correctionSemitones * amount;
+            ratioTrajectory[(size_t)i] = std::pow(2.0f, applied / 12.0f);
             correctionCents.store(applied * 100.0f);
             processIn[(size_t)i*2] = left;
             processIn[(size_t)i*2+1] = right;
@@ -420,17 +421,20 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         // 64-sample control slices keep the ratio trajectory continuous while
         // avoiding per-sample SoundTouch control calls.
         constexpr int controlSlice = 64;
+        int written = 0;
         for (int slice = 0; slice < frames; slice += controlSlice)
         {
-            const float targetRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
+            const int sliceFrames = juce::jmin(controlSlice, frames - slice);
+            const float targetRatio = ratioTrajectory[(size_t)slice];
             const float current = shifter.getPitchRatio();
             const float maxRatioDelta = lowLatency ? 0.0012f : 0.0008f;
             const float nextRatio = current + juce::jlimit(-maxRatioDelta, maxRatioDelta, targetRatio - current);
             shifter.setPitchRatio(nextRatio);
-            const int sliceFrames = juce::jmin(controlSlice, frames - slice);
-            juce::ignoreUnused(sliceFrames);
+            shifter.putStereo(processIn.data() + (size_t)slice * 2, sliceFrames);
+            written += sliceFrames;
         }
-        shifter.putStereo(processIn.data(), frames);
+        juce::ignoreUnused(written);
+        std::fill(processOut.begin(), processOut.begin() + (size_t)frames * 2, 0.0f);
         const int got = shifter.receiveStereo(processOut.data(), frames);
         // Do not fill missing wet frames with the current input. That input is
         // not latency-aligned with the SoundTouch stream and can create a hard

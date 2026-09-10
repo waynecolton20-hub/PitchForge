@@ -118,6 +118,7 @@ private:
 
     std::vector<float> processIn;
     std::vector<float> processOut;
+    std::array<float, processingChunk> ratioTrajectory{};
     std::vector<float> doublerOut;
     std::vector<float> dryDelay;
     size_t dryDelayWrite = 0;

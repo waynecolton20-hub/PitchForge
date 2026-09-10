@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Write-Host 'PITCHFORGE SOURCE AUDIT v4.6.0'
+Write-Host 'PITCHFORGE SOURCE AUDIT v4.6.1'
 
 $required = @(
     'CMakeLists.txt',
@@ -56,7 +56,7 @@ $checks = @(
 [pscustomobject]@{ Pass = ($ps -notmatch 'processingChunk \* 4'); Name = 'Legacy oversized processing chunk multiplier is absent' },
 [pscustomobject]@{ Pass = ($ps -notmatch 'SmoothPitchShifter'); Name = 'Legacy granular shifter is absent' },
     [pscustomobject]@{ Pass = ($ps -match 'YIN-style cumulative mean normalized difference' -and $ps -match 'yinThreshold'); Name = 'Vocal detector uses YIN period tracking' },
-    [pscustomobject]@{ Pass = ($ps -match 'detectorSize / 4' -and $ps -match 'i \+= 4'); Name = 'Pitch detector analysis cadence is realtime-CPU-conscious' },
+    [pscustomobject]@{ Pass = ($ps -match 'detectorSize / 16' -and $ps -match 'i \+= 4'); Name = 'Pitch detector analysis cadence is realtime-CPU-conscious' },
     [pscustomobject]@{ Pass = ($ps -match 'constexpr int sequenceMs = 110' -and $ps -match 'constexpr int seekMs = 24' -and $ps -match 'constexpr int overlapMs = 20'); Name = 'Pitch engine uses fixed studio-quality WSOLA geometry' },
     [pscustomobject]@{ Pass = ($ps -match '(?s)setLowLatency\(bool enabled\).*?lowLatency = enabled' -and $ps -notmatch 'engine\.clear\(\);\s*fifoRead = fifoWrite = fifoCount = 0;\s*primed = false;\s*configure\(enabled\)' ); Name = 'Low Latency mode does not flush the realtime pitch engine' },
     [pscustomobject]@{ Pass = ($ps -match 'configure\(false\);\s*reset\(\);\s*prepared = true'); Name = 'Pitch engine starts directly in quality mode without first-block reconfiguration' },
@@ -65,9 +65,9 @@ $checks = @(
     [pscustomobject]@{ Pass = ($processBody -match '(?s)if\s*\(got\s*==\s*0\s*\).*?wetL\s*=\s*dryL.*?wetR\s*=\s*dryR'); Name = 'Wet underflow falls back to latency-aligned dry' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'processOut\[\(size_t\)i \* 2\] = processIn\[\(size_t\)i \* 2\]'); Name = 'Wet underflow never copies undelayed input into wet path' },
     [pscustomobject]@{ Pass = ($processBody -notmatch '(?i)(new\s+\w+|delete\s+|std::malloc|std::free|\.resize\s*\(|\.assign\s*\(|std::vector\s*<[^>]+>\s+\w+\s*[;=]|std::string\s+\w+\s*[;=]|juce::String\s+\w+\s*[;=]|make_unique|make_shared|lock_guard|ScopedLock|CriticalSection|MessageManagerLock|Logger::|juce::File|std::cout|std::cerr)'); Name = 'processBlock has no obvious realtime-allocation/locking/I-O operations' },
-    [pscustomobject]@{ Pass = ($processBody -match 'shifter\.putStereo\(processIn\.data\(\), frames\)'); Name = 'processBlock feeds the primary shifter' },
+    [pscustomobject]@{ Pass = ($processBody -match 'ratioTrajectory' -and $processBody -match 'shifter\.putStereo\(processIn\.data\(\) \+ \(size_t\)slice \* 2, sliceFrames\)'); Name = 'Primary shifter receives segmented ratio-matched input' },
     [pscustomobject]@{ Pass = ($ps -match 'if\s*\(fifoCount < \(size_t\) frames\) return 0;'); Name = 'Primary shifter never returns partial wet blocks' },
-    [pscustomobject]@{ Pass = ($ps -match 'const float maxRatioDelta = lowLatency \? 0\.006f : 0\.003f;'); Name = 'Primary pitch ratio slew is bounded to a safe per-block delta' },
+    [pscustomobject]@{ Pass = ($ps -match 'const float maxRatioDelta = lowLatency \? 0\.0012f : 0\.0008f;'); Name = 'Primary pitch ratio slew is bounded to a safe per-block delta' },
     [pscustomobject]@{ Pass = ($ps -match 'const float dMaxDelta = lowLatency \? 0\.004f : 0\.0025f;'); Name = 'Doubler pitch ratio slew is bounded to a safe per-block delta' },
     [pscustomobject]@{ Pass = ($ps -notmatch '0\.00075f \* \(float\) frames|0\.00055f \* \(float\) frames'); Name = 'Legacy oversized ratio slew coefficients are absent' },
     [pscustomobject]@{ Pass = ($ps -match 'AudioParameterBool>\(\"lowLatency\", \"Low Latency\", false\)'); Name = 'Quality mode is the default instead of low-latency mode' },
@@ -85,7 +85,7 @@ $checks = @(
     [pscustomobject]@{ Pass = ($wfNormalized -notmatch 'cmake --build build --config Release --parallel 2 2'); Name = 'Malformed duplicate parallel argument is absent' },
     [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
     [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
-    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.6\.0-Windows-VST3\.zip'); Name = 'Final v4.6.0 artifact name is consistent' },
+    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.6\.0-Windows-VST3\.zip'); Name = 'Final v4.6.1 artifact name is consistent' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },
     [pscustomobject]@{ Pass = ($wf -notmatch '\x60(?:r\x60n|n|r)'); Name = 'Workflow has no literal PowerShell newline escape text' }
