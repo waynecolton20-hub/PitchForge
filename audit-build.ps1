@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.10'
+Write-Host 'PITCHFORGE SOURCE AUDIT v4.2.2'
 
 $required = @(
     'CMakeLists.txt',
@@ -54,7 +54,8 @@ $checks = @(
     [pscustomobject]@{ Pass = ($ed -match 'PathStrokeType\(4\.0f,\s*juce::PathStrokeType::curved,\s*juce::PathStrokeType::rounded\)'); Name = 'Needle stroke constructor uses valid JUCE signature' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'SmoothPitchShifter'); Name = 'Legacy granular shifter is absent' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'processOut\[\(size_t\)i \* 2\] = 0\.0f'); Name = 'No hard-zero wet-output fallback remains' },
-    [pscustomobject]@{ Pass = ($ps -match 'processOut\[\(size_t\)i \* 2\] = processIn\[\(size_t\)i \* 2\]'); Name = 'Wet underflow uses continuity fallback' },
+    [pscustomobject]@{ Pass = ($processBody -match '(?s)if\s*\(i\s*>=\s*got\s*\).*?wetL\s*=\s*dryL.*?wetR\s*=\s*dryR'); Name = 'Wet underflow falls back to latency-aligned dry' },
+    [pscustomobject]@{ Pass = ($ps -notmatch 'processOut\[\(size_t\)i \* 2\] = processIn\[\(size_t\)i \* 2\]'); Name = 'Wet underflow never copies undelayed input into wet path' },
     [pscustomobject]@{ Pass = ($processBody -notmatch '(?i)(new\s+\w+|delete\s+|std::malloc|std::free|\.resize\s*\(|\.assign\s*\(|std::vector\s*<[^>]+>\s+\w+\s*[;=]|std::string\s+\w+\s*[;=]|juce::String\s+\w+\s*[;=]|make_unique|make_shared|lock_guard|ScopedLock|CriticalSection|MessageManagerLock|Logger::|juce::File|std::cout|std::cerr)'); Name = 'processBlock has no obvious realtime-allocation/locking/I-O operations' },
     [pscustomobject]@{ Pass = ($processBody -match 'shifter\.putStereo\(processIn\.data\(\), frames\)'); Name = 'processBlock feeds the primary shifter' },
     [pscustomobject]@{ Pass = ($processBody -match 'shifter\.receiveStereo\(processOut\.data\(\), frames\)'); Name = 'processBlock drains the primary shifter' },
@@ -67,8 +68,7 @@ $checks = @(
     [pscustomobject]@{ Pass = ($wfNormalized -notmatch 'cmake --build build --config Release --parallel 2 2'); Name = 'Malformed duplicate parallel argument is absent' },
     [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
     [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
-    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.10-Windows-VST3\.zip'); Name = 'Final v4.1.10 artifact name is consistent' },
-    [pscustomobject]@{ Pass = ($processBody -match '(?s)for\s*\(\s*int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\s*\)\s*\{\s*processOut\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\]\s*=\s*processIn\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\]\s*;\s*processOut\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\+\s*1\s*\]\s*=\s*processIn\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\+\s*1\s*\]\s*;\s*\}' -and $processBody -notmatch '(?s)for\s*\(\s*int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\s*\)\s*\{.*?processOut\s*\[[^]]+\]\s*=\s*0\.0f') ; Name = 'Underflow loop uses continuity fallback instead of zero padding' },
+    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.2\.2-Windows-VST3\.zip'); Name = 'Final v4.2.2 artifact name is consistent' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },
     [pscustomobject]@{ Pass = ($wf -notmatch '\x60(?:r\x60n|n|r)'); Name = 'Workflow has no literal PowerShell newline escape text' }

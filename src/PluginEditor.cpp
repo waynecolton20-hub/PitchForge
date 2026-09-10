@@ -1,72 +1,124 @@
 #include "PluginEditor.h"
+#include <cmath>
 
-namespace { constexpr int notes=12; const char* noteNames[]={"C","C#","D","D#","E","F","F#","G","G#","A","A#","B"}; }
-
-PitchForgeLookAndFeel::PitchForgeLookAndFeel(){ setColour(juce::Slider::textBoxTextColourId,juce::Colours::white); }
-void PitchForgeLookAndFeel::drawRotarySlider(juce::Graphics& g,int x,int y,int w,int h,float pos,float start,float end,juce::Slider&)
+namespace
 {
-    auto b=juce::Rectangle<float>((float)x,(float)y,(float)w,(float)h).reduced(6.0f); auto c=b.getCentre(); float r=juce::jmin(b.getWidth(),b.getHeight())*0.43f;
-    g.setColour(juce::Colour(0xff0e1117)); g.fillEllipse(c.x-r,c.y-r,2*r,2*r);
-    juce::Colour ring(0xff9b61ff); g.setColour(juce::Colour(0xff2c313b)); g.drawEllipse(c.x-r,c.y-r,2*r,2*r,8.0f);
-    juce::Path arc; arc.addCentredArc(c.x,c.y,r,r,r,start,end*pos+start*(1.0f-pos),true); g.setColour(ring); g.strokePath(arc,juce::PathStrokeType(5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.setColour(juce::Colour(0xffd8c7ff)); g.fillEllipse(c.x-3,c.y-3,6,6);
+constexpr const char* noteNames[] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+const juce::Colour bg(0xff07090d);
+const juce::Colour panel(0xff10141b);
+const juce::Colour panel2(0xff141922);
+const juce::Colour border(0xff252c37);
+const juce::Colour text(0xfff4f5f8);
+const juce::Colour muted(0xff8992a1);
+const juce::Colour accent(0xff9a6bff);
+const juce::Colour cyan(0xff6fe6ff);
 }
-void PitchForgeLookAndFeel::drawToggleButton(juce::Graphics& g,juce::ToggleButton& b,bool highlighted,bool)
-{ auto r=b.getLocalBounds().toFloat().reduced(2); g.setColour(b.getToggleState()?juce::Colour(0xff8f62ff):juce::Colour(0xff303540)); g.fillRoundedRectangle(r,8); g.setColour(juce::Colours::white.withAlpha(0.88f)); g.setFont(12); g.drawText(b.getButtonText(),r,juce::Justification::centred); }
+
+PitchForgeLookAndFeel::PitchForgeLookAndFeel()
+{
+    setColour(juce::Slider::textBoxTextColourId, text);
+    setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xff0a0d12));
+    setColour(juce::Slider::textBoxOutlineColourId, border);
+    setColour(juce::ComboBox::backgroundColourId, juce::Colour(0xff0b0f15));
+    setColour(juce::ComboBox::outlineColourId, border);
+    setColour(juce::ComboBox::textColourId, text);
+}
+
+void PitchForgeLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int w, int h,
+                                              float pos, float start, float end, juce::Slider& slider)
+{
+    auto b = juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h).reduced(7.0f);
+    const auto c = b.getCentre();
+    const float r = juce::jmin(b.getWidth(), b.getHeight()) * 0.38f;
+    const float arcStart = juce::MathConstants<float>::pi * 1.25f;
+    const float arcEnd = juce::MathConstants<float>::pi * 2.75f;
+
+    g.setColour(juce::Colour(0xff0a0d12));
+    g.fillEllipse(c.x - r - 5.0f, c.y - r - 5.0f, (r + 5.0f) * 2.0f, (r + 5.0f) * 2.0f);
+    g.setColour(border);
+    g.drawEllipse(c.x - r, c.y - r, r * 2.0f, r * 2.0f, 2.0f);
+
+    juce::Path track;
+    track.addCentredArc(c.x, c.y, r, r, 0.0f, arcStart, arcEnd, true);
+    g.setColour(juce::Colour(0xff303744));
+    g.strokePath(track, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    juce::Path value;
+    value.addCentredArc(c.x, c.y, r, r, 0.0f, arcStart, arcStart + (arcEnd - arcStart) * pos, true);
+    g.setColour(accent);
+    g.strokePath(value, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+    const float angle = arcStart + (arcEnd - arcStart) * pos;
+    const float px = c.x + std::cos(angle) * (r - 2.0f);
+    const float py = c.y + std::sin(angle) * (r - 2.0f);
+    g.setColour(cyan);
+    g.fillEllipse(px - 3.0f, py - 3.0f, 6.0f, 6.0f);
+    juce::ignoreUnused(start, end, slider);
+}
+
+void PitchForgeLookAndFeel::drawToggleButton(juce::Graphics& g, juce::ToggleButton& b, bool highlighted, bool)
+{
+    auto r = b.getLocalBounds().toFloat().reduced(1.0f);
+    const bool on = b.getToggleState();
+    g.setColour(on ? juce::Colour(0xff2a2042) : juce::Colour(0xff0b0f15));
+    g.fillRoundedRectangle(r, 9.0f);
+    g.setColour(on ? accent : border);
+    g.drawRoundedRectangle(r, 9.0f, 1.0f);
+    g.setColour(on ? text : muted);
+    g.setFont(12.0f);
+    g.drawText(b.getButtonText(), r.reduced(9.0f, 0.0f), juce::Justification::centredLeft);
+    const float d = 8.0f;
+    const float cx = r.getRight() - 15.0f;
+    const float cy = r.getCentreY();
+    g.setColour(on ? cyan : juce::Colour(0xff3a424f));
+    g.fillEllipse(cx - d * 0.5f, cy - d * 0.5f, d, d);
+    juce::ignoreUnused(highlighted);
+}
 
 PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioProcessor& p)
     : AudioProcessorEditor(&p), processor(p)
 {
     setLookAndFeel(&lf);
     setResizable(true, true);
-    setSize(1040, 660);
-    setResizeLimits(900, 580, 1500, 900);
+    setSize(1400, 900);
+    setResizeLimits(1120, 760, 1920, 1200);
 
     title.setText("PITCHFORGE", juce::dontSendNotification);
-    title.setFont(juce::Font(18.0f, juce::Font::bold));
-    title.setColour(juce::Label::textColourId, juce::Colours::white);
+    title.setFont(juce::Font(22.0f, juce::Font::bold));
+    title.setColour(juce::Label::textColourId, text);
     addAndMakeVisible(title);
 
-    subtitle.setText("PRECISION VOCAL TUNING  •  PRO", juce::dontSendNotification);
-    subtitle.setFont(juce::Font(10.0f));
-    subtitle.setColour(juce::Label::textColourId, juce::Colour(0xff9fa5b1));
+    subtitle.setText("PRECISION VOCAL TUNING  /  PROFESSIONAL EDITION", juce::dontSendNotification);
+    subtitle.setFont(juce::Font(10.0f, juce::Font::bold));
+    subtitle.setColour(juce::Label::textColourId, muted);
     addAndMakeVisible(subtitle);
 
-    addKnob(speed, "Speed", -3, 200, 20);
-    addKnob(amount, "Amount", 0, 1, 1);
-    addKnob(sustain, "Sustain", -1, 1, 0);
-    addKnob(mix, "Mix", 0, 1, 1);
-    addKnob(humanize, "Humanize", 0, 1, 0.10);
-    addKnob(range, "Range", 0, 12, 12);
+    addKnob(speed, "Speed", -3.0f, 200.0f, 20.0f);
+    addKnob(amount, "Amount", 0.0f, 1.0f, 1.0f);
+    addKnob(sustain, "Sustain", -1.0f, 1.0f, 0.0f);
+    addKnob(mix, "Mix", 0.0f, 1.0f, 1.0f);
+    addKnob(humanize, "Humanize", 0.0f, 1.0f, 0.10f);
+    addKnob(range, "Range", 0.0f, 12.0f, 12.0f);
 
     speed.setTextValueSuffix(" ms");
-    amount.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    amount.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
-    sustain.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    sustain.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
-    mix.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    mix.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
-    humanize.textFromValueFunction = [](double v){ return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
-    humanize.valueFromTextFunction = [](const juce::String& t){ return t.getFloatValue() * 0.01; };
+    amount.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
+    amount.valueFromTextFunction = [](const juce::String& t) { return t.getFloatValue() * 0.01; };
+    sustain.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
+    sustain.valueFromTextFunction = [](const juce::String& t) { return t.getFloatValue() * 0.01; };
+    mix.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
+    mix.valueFromTextFunction = [](const juce::String& t) { return t.getFloatValue() * 0.01; };
+    humanize.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
+    humanize.valueFromTextFunction = [](const juce::String& t) { return t.getFloatValue() * 0.01; };
     range.setTextValueSuffix(" st");
 
-    scale.addItem("Chromatic", 1);
-    scale.addItem("Major", 2);
-    scale.addItem("Minor", 3);
-    addAndMakeVisible(scale);
-    stabilizer.addItem("None", 1);
-    stabilizer.addItem("Short", 2);
-    stabilizer.addItem("Mid", 3);
-    stabilizer.addItem("Long", 4);
-    addAndMakeVisible(stabilizer);
+    scale.addItem("Chromatic", 1); scale.addItem("Major", 2); scale.addItem("Minor", 3);
+    stabilizer.addItem("None", 1); stabilizer.addItem("Short", 2); stabilizer.addItem("Mid", 3); stabilizer.addItem("Long", 4);
     for (int i = 0; i < 12; ++i) key.addItem(noteNames[i], i + 1);
-    addAndMakeVisible(key);
+    for (auto* c : { &scale, &stabilizer, &key }) addAndMakeVisible(*c);
 
-    auto addToggle = [&](juce::ToggleButton& b, const juce::String& text)
+    auto addToggle = [&](juce::ToggleButton& b, const juce::String& label)
     {
-        b.setButtonText(text);
-        b.setLookAndFeel(&lf);
-        addAndMakeVisible(b);
+        b.setButtonText(label); b.setLookAndFeel(&lf); addAndMakeVisible(b);
     };
     addToggle(chromatic, "Chromatic");
     addToggle(lowLatency, "Low Latency");
@@ -74,51 +126,34 @@ PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioPr
     addToggle(heatmap, "HeatMap");
     addToggle(doubler, "Doubler");
 
-    noteMode.setButtonText("Note");
-    majorMode.setButtonText("Major");
-    minorMode.setButtonText("Minor");
-    holdMajor.setButtonText("Hold");
-    holdMinor.setButtonText("Hold");
-    resetButton.setButtonText("RESET");
-    for (auto* b : { &noteMode, &majorMode, &minorMode, &holdMajor, &holdMinor, &resetButton })
-        addAndMakeVisible(b);
-
-    noteMode.onClick = [this]{ setScaleMode(0); };
-    majorMode.onClick = [this]{ setScaleMode(1); };
-    minorMode.onClick = [this]{ setScaleMode(2); };
-    holdMajor.onClick = [this]{ stabilizer.setSelectedId(3, juce::sendNotificationSync); };
-    holdMinor.onClick = [this]{ stabilizer.setSelectedId(4, juce::sendNotificationSync); };
+    noteMode.setButtonText("Chromatic"); majorMode.setButtonText("Major"); minorMode.setButtonText("Minor");
+    holdMajor.setButtonText("Hold Major"); holdMinor.setButtonText("Hold Minor"); resetButton.setButtonText("RESET");
+    for (auto* b : { &noteMode, &majorMode, &minorMode, &holdMajor, &holdMinor, &resetButton }) addAndMakeVisible(b);
+    noteMode.onClick = [this] { setScaleMode(0); };
+    majorMode.onClick = [this] { setScaleMode(1); };
+    minorMode.onClick = [this] { setScaleMode(2); };
+    holdMajor.onClick = [this] { stabilizer.setSelectedId(3, juce::sendNotificationSync); };
+    holdMinor.onClick = [this] { stabilizer.setSelectedId(4, juce::sendNotificationSync); };
     resetButton.onClick = [this]
     {
-        speed.setValue(20.0, juce::sendNotificationSync);
-        amount.setValue(1.0, juce::sendNotificationSync);
-        sustain.setValue(0.0, juce::sendNotificationSync);
-        mix.setValue(1.0, juce::sendNotificationSync);
-        humanize.setValue(0.10, juce::sendNotificationSync);
-        range.setValue(12.0, juce::sendNotificationSync);
+        speed.setValue(20.0, juce::sendNotificationSync); amount.setValue(1.0, juce::sendNotificationSync);
+        sustain.setValue(0.0, juce::sendNotificationSync); mix.setValue(1.0, juce::sendNotificationSync);
+        humanize.setValue(0.10, juce::sendNotificationSync); range.setValue(12.0, juce::sendNotificationSync);
+        pitchRef.setValue(440.0, juce::sendNotificationSync); width.setValue(50.0, juce::sendNotificationSync);
+        doublerMix.setValue(0.0, juce::sendNotificationSync);
     };
 
-    pitchRef.setRange(430, 450, 0.01);
-    pitchRef.setTextValueSuffix(" Hz");
-    pitchRef.setSliderStyle(juce::Slider::LinearHorizontal);
-    addAndMakeVisible(pitchRef);
-    width.setRange(0, 100, 0.1);
-    width.setValue(50);
-    width.setTextValueSuffix(" %");
-    addAndMakeVisible(width);
-    doublerMix.setRange(0, 100, 0.1);
-    doublerMix.setValue(0);
-    doublerMix.setTextValueSuffix(" %");
-    addAndMakeVisible(doublerMix);
+    pitchRef.setRange(430.0, 450.0, 0.01); pitchRef.setTextValueSuffix(" Hz");
+    pitchRef.setSliderStyle(juce::Slider::LinearHorizontal); pitchRef.setTextBoxStyle(juce::Slider::TextBoxRight, false, 78, 24);
+    width.setRange(0.0, 100.0, 0.1); width.setTextValueSuffix(" %");
+    doublerMix.setRange(0.0, 100.0, 0.1); doublerMix.setTextValueSuffix(" %");
+    addAndMakeVisible(pitchRef); addAndMakeVisible(width); addAndMakeVisible(doublerMix);
 
-    latencyLabel.setColour(juce::Label::textColourId, juce::Colour(0xffb9bec9));
-    confidenceLabel.setColour(juce::Label::textColourId, juce::Colour(0xffb9bec9));
-    pitchLabel.setColour(juce::Label::textColourId, juce::Colours::white);
-    outputLabel.setColour(juce::Label::textColourId, juce::Colour(0xffaeb4c0));
-    addAndMakeVisible(latencyLabel);
-    addAndMakeVisible(confidenceLabel);
-    addAndMakeVisible(pitchLabel);
-    addAndMakeVisible(outputLabel);
+    for (auto* l : { &latencyLabel, &confidenceLabel, &pitchLabel, &outputLabel }) addAndMakeVisible(*l);
+    latencyLabel.setColour(juce::Label::textColourId, cyan);
+    confidenceLabel.setColour(juce::Label::textColourId, muted);
+    pitchLabel.setColour(juce::Label::textColourId, text);
+    outputLabel.setColour(juce::Label::textColourId, muted);
 
     speedAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.getAPVTS(), "speed", speed);
     amountAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(processor.getAPVTS(), "amount", amount);
@@ -140,218 +175,266 @@ PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioPr
     startTimerHz(30);
 }
 
-PitchForgeAudioProcessorEditor::~PitchForgeAudioProcessorEditor()
-{
-    setLookAndFeel(nullptr);
-}
+PitchForgeAudioProcessorEditor::~PitchForgeAudioProcessorEditor() { setLookAndFeel(nullptr); }
 
-void PitchForgeAudioProcessorEditor::addKnob(juce::Slider& s, const juce::String&, float lo, float hi, float val)
+void PitchForgeAudioProcessorEditor::addKnob(juce::Slider& s, const juce::String& label, float lo, float hi, float val)
 {
     s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 76, 18);
-    s.setRange(lo, hi, 0.01);
-    s.setValue(val);
-    s.setLookAndFeel(&lf);
-    addAndMakeVisible(s);
+    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 82, 22);
+    s.setRange(lo, hi, 0.01); s.setValue(val); s.setName(label); s.setLookAndFeel(&lf); addAndMakeVisible(s);
 }
 
-void PitchForgeAudioProcessorEditor::setScaleMode(int mode)
-{
-    scale.setSelectedId(mode + 1, juce::sendNotificationSync);
-}
+void PitchForgeAudioProcessorEditor::setScaleMode(int mode) { scale.setSelectedId(mode + 1, juce::sendNotificationSync); }
 
-void PitchForgeAudioProcessorEditor::drawHistory(juce::Graphics& g, juce::Rectangle<float> area, const std::array<float,72>& history, juce::Colour lineColour)
+void PitchForgeAudioProcessorEditor::drawHistory(juce::Graphics& g, juce::Rectangle<float> area,
+                                                 const std::array<float,72>& history, juce::Colour lineColour)
 {
-    g.setColour(juce::Colour(0xff11151b));
-    g.fillRoundedRectangle(area, 10.0f);
-    g.setColour(juce::Colour(0xff252b34));
-    for (int i = 1; i < 4; ++i)
-        g.drawHorizontalLine((int) (area.getY() + area.getHeight() * i / 4.0f), area.getX(), area.getRight());
-
-    juce::Path path;
-    bool started = false;
+    g.setColour(juce::Colour(0xff0b0f15)); g.fillRoundedRectangle(area, 12.0f);
+    g.setColour(juce::Colour(0xff202631));
+    for (int i = 1; i < 4; ++i) g.drawHorizontalLine((int)(area.getY() + area.getHeight() * i / 4.0f), area.getX(), area.getRight());
+    juce::Path p; bool started = false;
     for (size_t i = 0; i < history.size(); ++i)
     {
-        const size_t idx = (historyPos + i) % history.size();
-        const float v = history[idx];
-        if (v <= 0.0f) continue;
-        const float x = area.getX() + area.getWidth() * (float) i / (float) (history.size() - 1);
-        const float y = area.getCentreY() - juce::jlimit(-1.0f, 1.0f, v) * area.getHeight() * 0.38f;
-        if (!started) { path.startNewSubPath(x, y); started = true; }
-        else path.lineTo(x, y);
+        const auto idx = (historyPos + i) % history.size();
+        const float v = juce::jlimit(-1.0f, 1.0f, history[idx]);
+        if (v == 0.0f) continue;
+        const float x = area.getX() + area.getWidth() * (float)i / (float)(history.size() - 1);
+        const float y = area.getCentreY() - v * area.getHeight() * 0.38f;
+        if (!started) { p.startNewSubPath(x, y); started = true; } else p.lineTo(x, y);
     }
-    if (started)
-    {
-        g.setColour(lineColour);
-        g.strokePath(path, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved));
-    }
+    if (started) { g.setColour(lineColour); g.strokePath(p, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved)); }
 }
 
 void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
 {
-    g.fillAll(juce::Colour(0xff06080b));
-    auto bounds = getLocalBounds().toFloat().reduced(10.0f);
-    g.setColour(juce::Colour(0xff14171d));
-    g.fillRoundedRectangle(bounds, 18.0f);
+    const auto bounds = getLocalBounds().toFloat();
+    g.fillAll(bg);
 
-    g.setColour(juce::Colour(0xff0c0f14));
-    g.fillRoundedRectangle(bounds.withTrimmedTop(48.0f), 16.0f);
+    auto frame = bounds.reduced(14.0f);
+    g.setColour(panel);
+    g.fillRoundedRectangle(frame, 20.0f);
+    g.setColour(border);
+    g.drawRoundedRectangle(frame, 20.0f, 1.0f);
 
     // Header
-    g.setColour(juce::Colour(0xff252a33));
-    g.fillRoundedRectangle(25.0f, 58.0f, 100.0f, 3.0f, 2.0f);
-    g.setColour(juce::Colour(0xff858b98));
-    g.setFont(9.0f);
-    g.drawText("INPUT", 34, 68, 70, 16, juce::Justification::left);
-    g.drawText("OUTPUT", 110, 68, 70, 16, juce::Justification::left);
+    auto header = frame.reduced(12.0f).removeFromTop(58.0f);
+    g.setColour(juce::Colour(0xff0b0f15));
+    g.fillRoundedRectangle(header, 14.0f);
+    g.setColour(accent);
+    g.fillRoundedRectangle(header.getX() + 18.0f, header.getBottom() - 3.0f, 108.0f, 3.0f, 2.0f);
 
-    // Hero tuner orb.
-    const auto orb = juce::Rectangle<float>(30, 92, 520, 320);
-    const auto c = orb.getCentre();
-    const float r = 116.0f;
-    for (int i = 7; i >= 0; --i)
+    // Main panels
+    const int gap = 12;
+    auto content = frame.reduced(12.0f);
+    content.removeFromTop(70);
+    auto bottom = content.removeFromBottom(156);
+    content.removeFromBottom(gap);
+    auto left = content.removeFromLeft((int)(content.getWidth() * 0.62f));
+    content.removeFromLeft(gap);
+    auto right = content;
+
+    auto drawPanel = [&g](juce::Rectangle<float> r)
     {
-        g.setColour(juce::Colour(0xff8d59e8).withAlpha(0.018f * (float) (8 - i)));
-        g.fillEllipse(c.x - r - i * 8.0f, c.y - r - i * 8.0f, 2.0f * (r + i * 8.0f), 2.0f * (r + i * 8.0f));
-    }
-    g.setColour(juce::Colour(0xff2b3038));
-    g.drawEllipse(c.x-r, c.y-r, 2*r, 2*r, 2.0f);
-    g.setColour(juce::Colour(0xff9b62f5));
-    g.drawEllipse(c.x-r+10, c.y-r+10, 2*(r-10), 2*(r-10), 4.0f);
+        g.setColour(juce::Colour(0xff0c1016));
+        g.fillRoundedRectangle(r, 15.0f);
+        g.setColour(border);
+        g.drawRoundedRectangle(r, 15.0f, 1.0f);
+    };
+
+    drawPanel(left);
+    drawPanel(right);
+    drawPanel(bottom);
+
+    // Left: tuner / pitch tracking
+    g.setColour(muted);
+    g.setFont(9.0f);
+    g.drawText("PITCH TRACKING", left.getX() + 18.0f, left.getY() + 12.0f, 180.0f, 14.0f, juce::Justification::left);
+    g.setColour(text);
+    g.setFont(16.0f);
+    g.drawText("Live tuner", left.getX() + 18.0f, left.getY() + 27.0f, 180.0f, 22.0f, juce::Justification::left);
+
+    const auto tunerArea = juce::Rectangle<float>(left.getX() + 18.0f, left.getY() + 54.0f,
+                                                   left.getWidth() - 36.0f, 150.0f);
+    const auto c = tunerArea.getCentre();
+    const float r = juce::jmin(tunerArea.getWidth(), tunerArea.getHeight()) * 0.34f;
+    g.setColour(juce::Colour(0xff151b24));
+    g.fillEllipse(c.x - r - 10.0f, c.y - r - 10.0f, (r + 10.0f) * 2.0f, (r + 10.0f) * 2.0f);
+    g.setColour(juce::Colour(0xff242c38));
+    g.drawEllipse(c.x - r, c.y - r, r * 2.0f, r * 2.0f, 2.0f);
+    g.setColour(accent.withAlpha(0.35f));
+    g.drawEllipse(c.x - r + 8.0f, c.y - r + 8.0f, (r - 8.0f) * 2.0f, (r - 8.0f) * 2.0f, 3.0f);
 
     const float cents = processor.getCorrectionCents();
     const float normalized = juce::jlimit(-1.0f, 1.0f, cents / 50.0f);
     const float angle = juce::MathConstants<float>::halfPi + normalized * 1.15f;
     juce::Path needle;
     needle.startNewSubPath(c.x, c.y);
-    needle.lineTo(c.x + std::cos(angle) * 88.0f, c.y - std::sin(angle) * 88.0f);
-    g.setColour(juce::Colour(0xff7edcff));
+    needle.lineTo(c.x + std::cos(angle) * r * 0.76f, c.y - std::sin(angle) * r * 0.76f);
+    g.setColour(cyan);
     g.strokePath(needle, juce::PathStrokeType(4.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
-    g.fillEllipse(c.x-5, c.y-5, 10, 10);
+    g.fillEllipse(c.x - 5.0f, c.y - 5.0f, 10.0f, 10.0f);
 
     const int midi = processor.getDetectedMidi();
     const juce::String note = midi >= 0 ? noteNames[(midi % 12 + 12) % 12] : "--";
-    g.setColour(juce::Colours::white);
-    g.setFont(46.0f);
-    g.drawText(note, c.x - 80, c.y + 35, 160, 58, juce::Justification::centred);
-    g.setColour(juce::Colour(0xff9ea5b1));
-    g.setFont(11.0f);
-    g.drawText("DETECTED", c.x - 60, c.y + 94, 120, 16, juce::Justification::centred);
-
-    // Lower visual heatmap.
-    g.setColour(juce::Colour(0xff20242c));
-    g.fillRoundedRectangle(30.0f, 432.0f, 520.0f, 86.0f, 12.0f);
-    g.setColour(juce::Colour(0xff8f5bf0).withAlpha(0.35f));
-    for (int i = 0; i < 56; ++i)
-    {
-        const float h = 6.0f + 28.0f * (0.5f + 0.5f * std::sin((float) i * 0.67f + (float) historyPos * 0.03f));
-        g.fillRoundedRectangle(38.0f + i * 8.7f, 510.0f - h, 5.0f, h, 2.0f);
-    }
-    g.setColour(juce::Colour(0xffd7dbe4));
+    g.setColour(text);
+    g.setFont(42.0f);
+    g.drawText(note, c.x - 70.0f, c.y + 25.0f, 140.0f, 52.0f, juce::Justification::centred);
+    g.setColour(muted);
     g.setFont(9.0f);
-    g.drawText("INPUT / OUTPUT HEATMAP", 42, 442, 200, 15, juce::Justification::left);
+    g.drawText("DETECTED NOTE", c.x - 80.0f, c.y + 72.0f, 160.0f, 15.0f, juce::Justification::centred);
 
-    // Right-side control tower background.
-    g.setColour(juce::Colour(0xff11151b));
-    g.fillRoundedRectangle(565.0f, 78.0f, 450.0f, 440.0f, 18.0f);
-    g.setColour(juce::Colour(0xff252a33));
-    g.fillRoundedRectangle(585.0f, 94.0f, 410.0f, 42.0f, 10.0f);
-    g.setColour(juce::Colour(0xffa366ff));
-    g.fillRoundedRectangle(600.0f, 130.0f, 380.0f, 3.0f, 2.0f);
-
-    g.setColour(juce::Colour(0xff9ba1ad));
+    // Live graph has its own reserved rectangle: never overlaps the knobs.
+    const float graphHeight = 70.0f;
+    auto graph = juce::Rectangle<float>(left.getX() + 18.0f, left.getBottom() - graphHeight - 18.0f,
+                                         left.getWidth() - 36.0f, graphHeight);
+    drawHistory(g, graph, inputHistory, cyan);
+    g.setColour(muted);
     g.setFont(9.0f);
-    g.drawText("KEY", 585, 150, 50, 15, juce::Justification::left);
-    g.drawText("SCALE", 700, 150, 60, 15, juce::Justification::left);
-    g.drawText("NOTE STABILIZER", 815, 150, 130, 15, juce::Justification::left);
-    g.drawText("TRACKING", 585, 268, 80, 15, juce::Justification::left);
-    g.drawText("PITCH REFERENCE", 585, 350, 120, 15, juce::Justification::left);
-    g.drawText("DOUBLER", 585, 420, 80, 15, juce::Justification::left);
+    g.drawText("LIVE CORRECTION HISTORY", graph.getX() + 10.0f, graph.getY() + 7.0f,
+               190.0f, 14.0f, juce::Justification::left);
 
-    g.setColour(juce::Colour(0xffaeb4c0));
-    g.setFont(10.0f);
-    g.drawText("INPUT  " + juce::String(processor.getInputPitchHz(), 1) + " Hz", 585, 285, 190, 18, juce::Justification::left);
-    g.drawText("OUTPUT  " + juce::String(processor.getOutputPitchHz(), 1) + " Hz", 785, 285, 190, 18, juce::Justification::right);
+    // Right: tuning controls with explicit rows and no hard-coded overflow.
+    g.setColour(muted); g.setFont(9.0f);
+    g.drawText("CORRECTION ENGINE", right.getX() + 18.0f, right.getY() + 12.0f, 180.0f, 14.0f, juce::Justification::left);
+    g.setColour(text); g.setFont(16.0f);
+    g.drawText("Core tuning", right.getX() + 18.0f, right.getY() + 27.0f, 180.0f, 22.0f, juce::Justification::left);
 
-    // Keyboard along the bottom.
-    drawKeyboard(g, juce::Rectangle<int>(30, 530, 520, 82));
-}
+    g.setColour(border);
+    g.drawHorizontalLine((int)right.getY() + 60, right.getX() + 18.0f, right.getRight() - 18.0f);
+    g.setColour(muted); g.setFont(8.5f);
+    g.drawText("KEY", key.getX(), key.getY() - 14.0f, key.getWidth(), 12.0f, juce::Justification::left);
+    g.drawText("SCALE", scale.getX(), scale.getY() - 14.0f, scale.getWidth(), 12.0f, juce::Justification::left);
+    g.drawText("STABILIZER", stabilizer.getX(), stabilizer.getY() - 14.0f, stabilizer.getWidth(), 12.0f, juce::Justification::left);
 
-void PitchForgeAudioProcessorEditor::drawKeyboard(juce::Graphics& g, juce::Rectangle<int> area)
-{
-    const int whiteW = area.getWidth() / 7;
-    static const int blackPos[] = { 1, 2, 4, 5, 6 };
-    const int selected = processor.getTargetMidi();
-    for (int i = 0; i < 7; ++i)
-    {
-        const int pc = (i * 2 + 2) % 12;
-        const bool on = selected >= 0 && selected % 12 == pc;
-        g.setColour(on ? juce::Colour(0xff8d5bf3) : juce::Colour(0xffc5c8d0));
-        g.fillRoundedRectangle((float) area.getX() + i * whiteW, (float) area.getY(), whiteW - 2.0f, (float) area.getHeight(), 3.0f);
-        g.setColour(on ? juce::Colours::white : juce::Colour(0xff252832));
-        g.setFont(9.0f);
-        g.drawText(noteNames[pc], area.getX() + i * whiteW, area.getBottom() - 18, whiteW, 12, juce::Justification::centred);
-    }
-    for (int p : blackPos)
-    {
-        const int x = area.getX() + p * whiteW - whiteW / 4;
-        g.setColour(juce::Colour(0xff191c22));
-        g.fillRoundedRectangle((float) x, (float) area.getY(), whiteW / 2.0f, area.getHeight() * 0.60f, 3.0f);
-    }
+    g.setColour(muted); g.setFont(8.5f);
+    g.drawText("ENGINE MODES", right.getX() + 18.0f, right.getY() + 160.0f, 140.0f, 13.0f, juce::Justification::left);
+    g.setColour(border);
+    g.drawHorizontalLine((int)right.getY() + 274, right.getX() + 18.0f, right.getRight() - 18.0f);
+
+    g.setColour(muted); g.setFont(8.5f);
+    g.drawText("SIGNAL STATUS", right.getX() + 18.0f, right.getY() + 288.0f, 140.0f, 13.0f, juce::Justification::left);
+
+    // Bottom: precision / performance controls.
+    g.setColour(muted); g.setFont(9.0f);
+    g.drawText("PRECISION & PERFORMANCE", bottom.getX() + 18.0f, bottom.getY() + 12.0f, 220.0f, 14.0f, juce::Justification::left);
+    g.setColour(text); g.setFont(15.0f);
+    g.drawText("Fine control", bottom.getX() + 18.0f, bottom.getY() + 27.0f, 180.0f, 20.0f, juce::Justification::left);
+
+    g.setColour(border);
+    g.drawVerticalLine((int)(bottom.getX() + bottom.getWidth() * 0.58f), bottom.getY() + 14.0f, bottom.getBottom() - 14.0f);
+    g.setColour(muted); g.setFont(8.5f);
+    g.drawText("PITCH REFERENCE", pitchRef.getX(), pitchRef.getY() - 14.0f, pitchRef.getWidth() - 88.0f, 12.0f, juce::Justification::left);
+    g.drawText("DOUBLER WIDTH", width.getX(), width.getY() - 14.0f, width.getWidth(), 12.0f, juce::Justification::centred);
+    g.drawText("DOUBLER MIX", doublerMix.getX(), doublerMix.getY() - 14.0f, doublerMix.getWidth(), 12.0f, juce::Justification::centred);
 }
 
 void PitchForgeAudioProcessorEditor::resized()
 {
     const int w = getWidth();
-    title.setBounds(28, 18, 150, 24);
-    subtitle.setBounds(180, 21, 250, 18);
-    resetButton.setBounds(w - 118, 17, 90, 26);
+    const int h = getHeight();
+    const int outer = 26;
+    const int gap = 12;
 
-    speed.setBounds(w - 430, 78, 118, 122);
-    amount.setBounds(w - 295, 78, 118, 122);
-    sustain.setBounds(w - 155, 88, 105, 105);
-    mix.setBounds(w - 420, 190, 100, 100);
-    humanize.setBounds(w - 305, 190, 100, 100);
-    range.setBounds(w - 190, 190, 100, 100);
+    title.setBounds(outer + 4, 28, 190, 28);
+    subtitle.setBounds(outer + 204, 32, 420, 20);
+    resetButton.setBounds(w - outer - 96, 28, 96, 30);
 
-    key.setBounds(w - 430, 150, 95, 26);
-    scale.setBounds(w - 320, 150, 105, 26);
-    stabilizer.setBounds(w - 200, 150, 150, 26);
+    const int headerBottom = 96;
+    const int bottomH = 156;
+    const int contentBottom = h - 28;
+    const int mainBottom = contentBottom - bottomH - gap;
+    const int x = outer;
+    const int totalW = w - outer * 2;
+    const int leftW = (int)(totalW * 0.62f);
+    const int rightX = x + leftW + gap;
+    const int rightW = w - outer - rightX;
+    const int mainY = headerBottom;
+    const int mainH = mainBottom - mainY;
 
-    chromatic.setBounds(w - 430, 300, 105, 26);
-    lowLatency.setBounds(w - 315, 300, 105, 26);
-    detected.setBounds(w - 200, 300, 105, 26);
-    heatmap.setBounds(w - 430, 332, 105, 26);
-    doubler.setBounds(w - 315, 332, 105, 26);
-    latencyLabel.setBounds(w - 200, 332, 150, 22);
-    confidenceLabel.setBounds(w - 430, 365, 300, 22);
+    // Left panel: tuner, six knobs, and graph each own a dedicated vertical lane.
+    const int knobAreaY = mainY + 214;
+    const int knobAreaH = juce::jmax(160, mainH - 310);
+    const int colGap = 8;
+    const int innerX = x + 18;
+    const int innerW = leftW - 36;
+    const int colW = (innerW - colGap * 2) / 3;
+    const int rowGap = 4;
+    const int rowH = juce::jmax(78, (knobAreaH - rowGap) / 2);
 
-    pitchRef.setBounds(w - 430, 385, 380, 22);
-    width.setBounds(w - 420, 430, 100, 62);
-    doublerMix.setBounds(w - 300, 430, 100, 62);
-    pitchLabel.setBounds(w - 180, 430, 130, 22);
-    outputLabel.setBounds(w - 180, 456, 130, 22);
+    const int col0 = innerX;
+    const int col1 = innerX + colW + colGap;
+    const int col2 = innerX + (colW + colGap) * 2;
+    const int row0 = knobAreaY;
+    const int row1 = knobAreaY + rowH + rowGap;
 
-    noteMode.setBounds(w - 430, 118, 55, 24);
-    majorMode.setBounds(w - 370, 118, 60, 24);
-    minorMode.setBounds(w - 305, 118, 60, 24);
-    holdMajor.setBounds(w - 240, 118, 55, 24);
-    holdMinor.setBounds(w - 180, 118, 55, 24);
+    speed.setBounds(col0, row0 + 10, colW, rowH - 10);
+    amount.setBounds(col1, row0 + 10, colW, rowH - 10);
+    sustain.setBounds(col2, row0 + 10, colW, rowH - 10);
+    mix.setBounds(col0, row1 + 10, colW, rowH - 10);
+    humanize.setBounds(col1, row1 + 10, colW, rowH - 10);
+    range.setBounds(col2, row1 + 10, colW, rowH - 10);
+
+    // Right panel: three selector columns, two mode rows, then signal readout.
+    const int rx = rightX + 18;
+    const int rw = rightW - 36;
+    const int selectorGap = 10;
+    const int keyW = juce::jmax(72, (rw - selectorGap * 2) / 4);
+    const int scaleW = juce::jmax(100, (rw - selectorGap * 2) / 3);
+    const int stabX = rx + keyW + selectorGap + scaleW + selectorGap;
+    const int stabW = rightX + rightW - 18 - stabX;
+    const int selectorY = mainY + 86;
+
+    key.setBounds(rx, selectorY, keyW, 32);
+    scale.setBounds(rx + keyW + selectorGap, selectorY, scaleW, 32);
+    stabilizer.setBounds(stabX, selectorY, juce::jmax(90, stabW), 32);
+
+    const int toggleGap = 8;
+    const int toggleW = (rw - toggleGap) / 2;
+    const int toggleY = selectorY + 60;
+    chromatic.setBounds(rx, toggleY, toggleW, 34);
+    lowLatency.setBounds(rx + toggleW + toggleGap, toggleY, toggleW, 34);
+    detected.setBounds(rx, toggleY + 42, toggleW, 34);
+    heatmap.setBounds(rx + toggleW + toggleGap, toggleY + 42, toggleW, 34);
+    doubler.setBounds(rx, toggleY + 84, toggleW, 34);
+    latencyLabel.setBounds(rx + toggleW + toggleGap, toggleY + 84, toggleW, 34);
+
+    confidenceLabel.setBounds(rx, toggleY + 130, rw, 22);
+    pitchLabel.setBounds(rx, toggleY + 158, rw / 2 - 4, 22);
+    outputLabel.setBounds(rx + rw / 2 + 4, toggleY + 158, rw / 2 - 4, 22);
+
+    // Bottom panel.
+    const int bottomY = mainBottom + gap;
+    const int bottomX = x;
+    const int bottomW = totalW;
+    const int controlY = bottomY + 66;
+    const int splitX = bottomX + (int)(bottomW * 0.58f);
+
+    pitchRef.setBounds(bottomX + 18, controlY, splitX - bottomX - 48, 30);
+    width.setBounds(splitX + 22, controlY, 118, 70);
+    doublerMix.setBounds(splitX + 152, controlY, 118, 70);
+
+    const int modeY = bottomY + bottomH - 42;
+    int bx = bottomX + 18;
+    noteMode.setBounds(bx, modeY, 100, 28); bx += 108;
+    majorMode.setBounds(bx, modeY, 82, 28); bx += 90;
+    minorMode.setBounds(bx, modeY, 82, 28); bx += 90;
+    holdMajor.setBounds(bx, modeY, 108, 28); bx += 116;
+    holdMinor.setBounds(bx, modeY, 108, 28);
 }
 
 void PitchForgeAudioProcessorEditor::timerCallback()
 {
     const float conf = processor.getConfidence();
     const float cents = processor.getCorrectionCents();
-    confidenceLabel.setText("Confidence  " + juce::String(conf * 100.0f, 0) + "%    Correction  " + juce::String(cents, 1) + " cents", juce::dontSendNotification);
+    confidenceLabel.setText("Confidence  " + juce::String(conf * 100.0f, 0) + "%    •    Correction  " + juce::String(cents, 1) + " cents", juce::dontSendNotification);
     const bool ll = processor.getAPVTS().getRawParameterValue("lowLatency")->load() > 0.5f;
-    const int stab = (int) processor.getAPVTS().getRawParameterValue("stabilizer")->load();
-    latencyLabel.setText(ll ? "LOW LATENCY" : (stab > 0 ? "STABILIZER" : "TRACKING"), juce::dontSendNotification);
-    pitchLabel.setText("Pitch  " + juce::String(processor.getInputPitchHz(), 1) + " Hz", juce::dontSendNotification);
+    const int stab = (int)processor.getAPVTS().getRawParameterValue("stabilizer")->load();
+    latencyLabel.setText(ll ? "LOW LATENCY" : (stab > 0 ? "STABILIZED" : "TRACKING"), juce::dontSendNotification);
+    pitchLabel.setText("In  " + juce::String(processor.getInputPitchHz(), 1) + " Hz", juce::dontSendNotification);
     outputLabel.setText("Out  " + juce::String(processor.getOutputPitchHz(), 1) + " Hz", juce::dontSendNotification);
 
     inputHistory[historyPos] = processor.getInputPitchHz() > 0.0f ? juce::jlimit(-1.0f, 1.0f, processor.getCorrectionCents() / 50.0f) : 0.0f;
     outputHistory[historyPos] = processor.getOutputPitchHz() > 0.0f ? juce::jlimit(-1.0f, 1.0f, processor.getCorrectionCents() / 50.0f) : 0.0f;
-    historyPos = (historyPos + 1) % (int) inputHistory.size();
+    historyPos = (historyPos + 1) % (int)inputHistory.size();
     repaint();
 }

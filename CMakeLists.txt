@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(PitchForge VERSION 4.1.10)
+project(PitchForge VERSION 4.2.2)
 
 include(FetchContent)
 

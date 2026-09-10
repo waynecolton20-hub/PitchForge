@@ -76,6 +76,7 @@ private:
         void reset();
         void setLowLatency(bool enabled);
         void setPitchRatio(float ratio);
+        float getPitchRatio() const noexcept { return currentRatio; }
         void putStereo(const float* interleaved, int frames);
         int receiveStereo(float* interleaved, int maxFrames);
         int getLatencySamples() const noexcept { return latencySamples; }
