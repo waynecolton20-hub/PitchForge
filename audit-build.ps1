@@ -1,6 +1,6 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.9'
+Write-Host 'PITCHFORGE SOURCE AUDIT v4.1.10'
 
 $required = @(
     'CMakeLists.txt',
@@ -49,6 +49,7 @@ $checks = @(
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_SEEKWINDOW_MS,\s*seekMs\)'); Name = 'SoundTouch seek-window setting is present' },
     [pscustomobject]@{ Pass = ($ps -match 'engine\.setSetting\(SETTING_OVERLAP_MS,\s*overlapMs\)'); Name = 'SoundTouch overlap setting is present' },
     [pscustomobject]@{ Pass = ($ps -match 'engine\.getSetting\(SETTING_INITIAL_LATENCY\)'); Name = 'SoundTouch initial latency query is present' },
+    [pscustomobject]@{ Pass = ($ps -notmatch '(?s)AudioParameterFloat\([^;]*?,\s*[-+]?\d+(?:\.\d+)?f\s*,\s*[-+]?\d+(?:\.\d+)?f'); Name = 'All AudioParameterFloat ranges use JUCE 8 NormalisableRange' },
     [pscustomobject]@{ Pass = ($ed -notmatch 'textToValueFunction'); Name = 'JUCE Slider parser uses valueFromTextFunction' },
     [pscustomobject]@{ Pass = ($ed -match 'PathStrokeType\(4\.0f,\s*juce::PathStrokeType::curved,\s*juce::PathStrokeType::rounded\)'); Name = 'Needle stroke constructor uses valid JUCE signature' },
     [pscustomobject]@{ Pass = ($ps -notmatch 'SmoothPitchShifter'); Name = 'Legacy granular shifter is absent' },
@@ -66,7 +67,7 @@ $checks = @(
     [pscustomobject]@{ Pass = ($wfNormalized -notmatch 'cmake --build build --config Release --parallel 2 2'); Name = 'Malformed duplicate parallel argument is absent' },
     [pscustomobject]@{ Pass = ($wf -match 'Compress-Archive\s+-Path artifact/PitchForge\.vst3'); Name = 'VST3 artifact packaging step is present' },
     [pscustomobject]@{ Pass = ($wf -match 'if-no-files-found:\s*error'); Name = 'Artifact upload fails on missing package' },
-    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.9-Windows-VST3\.zip'); Name = 'Final v4.1.9 artifact name is consistent' },
+    [pscustomobject]@{ Pass = ($wf -match 'PitchForge-v4\.1\.10-Windows-VST3\.zip'); Name = 'Final v4.1.10 artifact name is consistent' },
     [pscustomobject]@{ Pass = ($processBody -match '(?s)for\s*\(\s*int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\s*\)\s*\{\s*processOut\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\]\s*=\s*processIn\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\]\s*;\s*processOut\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\+\s*1\s*\]\s*=\s*processIn\s*\[\s*\(size_t\)\s*i\s*\*\s*2\s*\+\s*1\s*\]\s*;\s*\}' -and $processBody -notmatch '(?s)for\s*\(\s*int\s+i\s*=\s*got\s*;\s*i\s*<\s*frames\s*;\s*\+\+i\s*\)\s*\{.*?processOut\s*\[[^]]+\]\s*=\s*0\.0f') ; Name = 'Underflow loop uses continuity fallback instead of zero padding' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> processIn'); Name = 'Process buffers are preallocated members' },
     [pscustomobject]@{ Pass = ($ph -match 'std::vector<float> fifo'); Name = 'Shifter FIFO is a persistent member' },

@@ -20,23 +20,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout PitchForgeAudioProcessor::cr
 {
     std::vector<std::unique_ptr<juce::RangedAudioParameter>> p;
     p.push_back(std::make_unique<juce::AudioParameterFloat>("speed", "Speed", juce::NormalisableRange<float>(-3.0f, 200.0f, 0.01f), 20.0f));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("amount", "Amount", 0.0f, 1.0f, 1.0f));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("sustain", "Sustain", -1.0f, 1.0f, 0.0f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("amount", "Amount", juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("sustain", "Sustain", juce::NormalisableRange<float>(-1.0f, 1.0f), 0.0f));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("stabilizer", "Note Stabilizer", juce::StringArray{"None","Short","Mid","Long"}, 0));
     p.push_back(std::make_unique<juce::AudioParameterBool>("lowLatency", "Low Latency", true));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("humanize", "Humanize", 0.0f, 1.0f, 0.10f));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("mix", "Mix", 0.0f, 1.0f, 1.0f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("humanize", "Humanize", juce::NormalisableRange<float>(0.0f, 1.0f), 0.10f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("mix", "Mix", juce::NormalisableRange<float>(0.0f, 1.0f), 1.0f));
     p.push_back(std::make_unique<juce::AudioParameterChoice>("scale", "Scale", juce::StringArray{"Chromatic","Major","Minor"}, 1));
     p.push_back(std::make_unique<juce::AudioParameterInt>("key", "Key", 0, 11, 0));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("pitchReference", "Pitch Reference", 430.0f, 450.0f, 440.0f, " Hz"));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("range", "Correction Range", 0.0f, 12.0f, 12.0f, " st"));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("pitchReference", "Pitch Reference", juce::NormalisableRange<float>(430.0f, 450.0f), 440.0f, " Hz"));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("range", "Correction Range", juce::NormalisableRange<float>(0.0f, 12.0f), 12.0f, " st"));
     p.push_back(std::make_unique<juce::AudioParameterBool>("chromatic", "Chromatic", false));
     p.push_back(std::make_unique<juce::AudioParameterBool>("detectedNotes", "Detected Notes", true));
     p.push_back(std::make_unique<juce::AudioParameterBool>("heatMap", "HeatMap", true));
     p.push_back(std::make_unique<juce::AudioParameterBool>("doubler", "Doubler", false));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("doublerWidth", "Doubler Width", 0.0f, 1.0f, 0.50f));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("doublerMix", "Doubler Mix", 0.0f, 1.0f, 0.0f));
-    p.push_back(std::make_unique<juce::AudioParameterFloat>("toneVolume", "Tone Volume", 0.0f, 1.0f, 0.35f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("doublerWidth", "Doubler Width", juce::NormalisableRange<float>(0.0f, 1.0f), 0.50f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("doublerMix", "Doubler Mix", juce::NormalisableRange<float>(0.0f, 1.0f), 0.0f));
+    p.push_back(std::make_unique<juce::AudioParameterFloat>("toneVolume", "Tone Volume", juce::NormalisableRange<float>(0.0f, 1.0f), 0.35f));
     return {p.begin(), p.end()};
 }
 
