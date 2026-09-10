@@ -10,8 +10,9 @@ const juce::Colour panel2(0xff141922);
 const juce::Colour border(0xff252c37);
 const juce::Colour text(0xfff4f5f8);
 const juce::Colour muted(0xff8992a1);
-const juce::Colour accent(0xff9a6bff);
-const juce::Colour cyan(0xff6fe6ff);
+const juce::Colour accent(0xffb18cff);
+const juce::Colour cyan(0xff75e7ff);
+const juce::Colour green(0xff63e6a4);
 }
 
 PitchForgeLookAndFeel::PitchForgeLookAndFeel()
@@ -29,7 +30,7 @@ void PitchForgeLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, in
 {
     auto b = juce::Rectangle<float>((float)x, (float)y, (float)w, (float)h).reduced(7.0f);
     const auto c = b.getCentre();
-    const float r = juce::jmin(b.getWidth(), b.getHeight()) * 0.38f;
+    const float r = juce::jmin(b.getWidth(), b.getHeight()) * 0.40f;
     const float arcStart = juce::MathConstants<float>::pi * 1.25f;
     const float arcEnd = juce::MathConstants<float>::pi * 2.75f;
 
@@ -41,12 +42,12 @@ void PitchForgeLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, in
     juce::Path track;
     track.addCentredArc(c.x, c.y, r, r, 0.0f, arcStart, arcEnd, true);
     g.setColour(juce::Colour(0xff303744));
-    g.strokePath(track, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.strokePath(track, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     juce::Path value;
     value.addCentredArc(c.x, c.y, r, r, 0.0f, arcStart, arcStart + (arcEnd - arcStart) * pos, true);
     g.setColour(accent);
-    g.strokePath(value, juce::PathStrokeType(5.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.strokePath(value, juce::PathStrokeType(7.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     const float angle = arcStart + (arcEnd - arcStart) * pos;
     const float px = c.x + std::cos(angle) * (r - 2.0f);
@@ -99,6 +100,13 @@ PitchForgeAudioProcessorEditor::PitchForgeAudioProcessorEditor(PitchForgeAudioPr
     addKnob(mix, "Mix", 0.0f, 1.0f, 1.0f);
     addKnob(humanize, "Humanize", 0.0f, 1.0f, 0.10f);
     addKnob(range, "Range", 0.0f, 12.0f, 12.0f);
+
+    speed.setTooltip("RETUNE SPEED — how quickly the correction moves toward the target note. Lower = smoother, higher = tighter.");
+    amount.setTooltip("CORRECTION — how much of the detected pitch error is corrected. 100% = full correction.");
+    sustain.setTooltip("SUSTAIN — stabilizes held notes and prevents rapid target changes.");
+    mix.setTooltip("WET / DRY — blend between the corrected vocal and the original vocal.");
+    humanize.setTooltip("HUMANIZE — adds controlled natural movement so correction does not sound unnaturally static.");
+    range.setTooltip("MAX CORRECTION — the maximum number of semitones PitchForge may move a detected note.");
 
     speed.setTextValueSuffix(" ms");
     amount.textFromValueFunction = [](double v) { return juce::String(juce::roundToInt(v * 100.0)) + " %"; };
@@ -180,7 +188,7 @@ PitchForgeAudioProcessorEditor::~PitchForgeAudioProcessorEditor() { setLookAndFe
 void PitchForgeAudioProcessorEditor::addKnob(juce::Slider& s, const juce::String& label, float lo, float hi, float val)
 {
     s.setSliderStyle(juce::Slider::RotaryHorizontalVerticalDrag);
-    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 82, 22);
+    s.setTextBoxStyle(juce::Slider::TextBoxBelow, false, 92, 24);
     s.setRange(lo, hi, 0.01); s.setValue(val); s.setName(label); s.setLookAndFeel(&lf); addAndMakeVisible(s);
 }
 
@@ -264,6 +272,14 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(accent.withAlpha(0.35f));
     g.drawEllipse(c.x - r + 8.0f, c.y - r + 8.0f, (r - 8.0f) * 2.0f, (r - 8.0f) * 2.0f, 3.0f);
 
+    // Premium control wells behind each rotary control.
+    for (auto* knob : { &speed, &amount, &sustain, &mix, &humanize, &range })
+    {
+        auto rr = knob->getBounds().toFloat().expanded(8.0f, 12.0f);
+        g.setColour(panel2); g.fillRoundedRectangle(rr, 12.0f);
+        g.setColour(borderSoft); g.drawRoundedRectangle(rr, 12.0f, 1.0f);
+    }
+
     const float cents = processor.getCorrectionCents();
     const float normalized = juce::jlimit(-1.0f, 1.0f, cents / 50.0f);
     const float angle = juce::MathConstants<float>::halfPi + normalized * 1.15f;
@@ -282,6 +298,25 @@ void PitchForgeAudioProcessorEditor::paint(juce::Graphics& g)
     g.setColour(muted);
     g.setFont(9.0f);
     g.drawText("DETECTED NOTE", c.x - 80.0f, c.y + 72.0f, 160.0f, 15.0f, juce::Justification::centred);
+
+    // Plain-English control map: always visible, so the user never has to guess what a knob means.
+    struct ControlInfo { juce::Slider* slider; const char* title; const char* body; };
+    const ControlInfo controls[] = {
+        { &speed, "RETUNE SPEED", "How fast pitch moves" },
+        { &amount, "CORRECTION", "How much error is fixed" },
+        { &sustain, "SUSTAIN", "Stability for held notes" },
+        { &mix, "WET / DRY", "Corrected vs original" },
+        { &humanize, "HUMANIZE", "Keeps movement natural" },
+        { &range, "MAX CORRECTION", "Largest allowed move" }
+    };
+    for (auto& cInfo : controls)
+    {
+        auto rr = cInfo.slider->getBounds().toFloat().expanded(4.0f, 10.0f);
+        g.setColour(text); g.setFont(10.0f, juce::Font::bold);
+        g.drawText(cInfo.title, rr.getX(), rr.getY() - 14.0f, rr.getWidth(), 13.0f, juce::Justification::centred);
+        g.setColour(muted); g.setFont(8.5f);
+        g.drawText(cInfo.body, rr.getX(), rr.getBottom() - 12.0f, rr.getWidth(), 12.0f, juce::Justification::centred);
+    }
 
     // Live graph has its own reserved rectangle: never overlaps the knobs.
     const float graphHeight = 70.0f;

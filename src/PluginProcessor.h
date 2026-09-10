@@ -43,7 +43,7 @@ public:
 
 private:
     static constexpr int detectorSize = 2048;
-    static constexpr int processingChunk = 128;
+    static constexpr int processingChunk = 512;
     static constexpr int fifoCapacityFrames = 65536;
     static constexpr float pi = 3.14159265358979323846f;
     static constexpr float minHz = 70.0f;

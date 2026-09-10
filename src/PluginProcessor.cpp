@@ -106,9 +106,9 @@ void PitchForgeAudioProcessor::HighQualityPitchShifter::prepare(double sampleRat
 void PitchForgeAudioProcessor::HighQualityPitchShifter::configure(bool enabledLowLatency)
 {
     lowLatency = enabledLowLatency;
-    const int sequenceMs = lowLatency ? 32 : 50;
-    const int seekMs = lowLatency ? 12 : 20;
-    const int overlapMs = lowLatency ? 8 : 10;
+    const int sequenceMs = lowLatency ? 45 : 70;
+    const int seekMs = lowLatency ? 18 : 28;
+    const int overlapMs = lowLatency ? 12 : 16;
     engine.setSetting(SETTING_SEQUENCE_MS, sequenceMs);
     engine.setSetting(SETTING_SEEKWINDOW_MS, seekMs);
     engine.setSetting(SETTING_OVERLAP_MS, overlapMs);
@@ -296,14 +296,6 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
     for (int base=0; base<n; base += chunkLimit)
     {
         const int frames = juce::jmin(chunkLimit, n-base);
-        float chunkRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
-        shifter.setPitchRatio(chunkRatio);
-        if (doubler && dMix > 0.001f)
-        {
-            const float widthSemis = (dWidth * 2.0f - 1.0f) * 6.0f;
-            doublerShifter.setPitchRatio(std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f));
-        }
-
         for (int i=0;i<frames;++i)
         {
             const float left = buffer.getSample(0, base+i);
@@ -351,12 +343,12 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         // Use the ratio calculated at the end of the chunk so the DSP control is
         // updated frequently without calling SoundTouch's control path every sample.
         const float targetRatio = std::pow(2.0f, (correctionSemitones * amount) / 12.0f);
-        // Limit instantaneous pitch-ratio movement presented to WSOLA. Large
-        // control jumps force abrupt grain decisions and are a common source of
-        // pitch-dependent zipper/crackle artifacts.
+        // Feed SoundTouch one smoothly moving control value. Never jump the WSOLA
+        // ratio at a chunk boundary: abrupt grain re-selection is a primary source
+        // of tonal crackle, especially on sustained vowels.
         const float current = shifter.getPitchRatio();
-        const float ratioStep = juce::jlimit(0.00025f, 0.015f, 0.0025f * (float) frames);
-        const float finalRatio = current + juce::jlimit(-ratioStep, ratioStep, targetRatio - current);
+        const float maxRatioDelta = 0.00075f * (float) frames;
+        const float finalRatio = current + juce::jlimit(-maxRatioDelta, maxRatioDelta, targetRatio - current);
         shifter.setPitchRatio(finalRatio);
         shifter.putStereo(processIn.data(), frames);
         const int got = shifter.receiveStereo(processOut.data(), frames);
@@ -368,7 +360,10 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
         if (doubler && dMix > 0.001f)
         {
             const float widthSemis = (dWidth * 2.0f - 1.0f) * 6.0f;
-            doublerShifter.setPitchRatio(std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f));
+            const float dTarget = std::pow(2.0f, (correctionSemitones * amount + widthSemis) / 12.0f);
+            const float dCurrent = doublerShifter.getPitchRatio();
+            const float dMaxDelta = 0.00055f * (float) frames;
+            doublerShifter.setPitchRatio(dCurrent + juce::jlimit(-dMaxDelta, dMaxDelta, dTarget - dCurrent));
             doublerShifter.putStereo(processIn.data(), frames);
         }
         int dGot = 0;
@@ -402,21 +397,21 @@ void PitchForgeAudioProcessor::processBlock(juce::AudioBuffer<float>& buffer, ju
             dryDelayWrite = (dryDelayWrite + 1) % dryCapacity;
 
             // SoundTouch can briefly under-run while its WSOLA analysis window
-            // is being replenished. Fall back to the latency-aligned dry sample,
-            // never to the current (undelayed) input sample.
+            // is being replenished. Never switch domains on a single sample.
+            // Instead, crossfade the wet path toward the latency-aligned dry path
+            // over several milliseconds and recover just as smoothly. This masks
+            // the exact discontinuity that previously produced audible crackle.
             if (i >= got)
             {
                 wetL = dryL;
                 wetR = dryR;
             }
 
-            // Never key the audible path directly from SoundTouch's variable
-            // output count. That creates a wet/dry modulation envelope whenever
-            // WSOLA returns short. Keep a single, slowly moving safety blend.
-            // Missing wet frames are already continuity-filled from processIn.
-            const float desiredBlend = 1.0f;
-            const float blendStep = 1.0f / juce::jmax(64.0f, (float) fs * 0.008f);
+            const bool wetAvailable = (got >= frames);
+            const float blendStep = 1.0f / juce::jmax(64.0f, (float) fs * 0.006f);
+            const float desiredBlend = wetAvailable ? 1.0f : 0.0f;
             if (processedBlend < desiredBlend) processedBlend = juce::jmin(desiredBlend, processedBlend + blendStep);
+            else if (processedBlend > desiredBlend) processedBlend = juce::jmax(desiredBlend, processedBlend - blendStep);
             const float safeWetL = dryL + (wetL - dryL) * processedBlend;
             const float safeWetR = dryR + (wetR - dryR) * processedBlend;
             const float outL = dryL + (safeWetL - dryL) * mix;
